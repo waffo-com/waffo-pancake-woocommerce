@@ -979,6 +979,7 @@ git commit -m "feat: 添加插件入口与WC_Payment_Gateway骨架"
 5. Webhook端点实现时需区分 `openssl_verify` 返回 `-1`（内部错误，如公钥损坏）与 `0`（验证失败/真实伪造）并分别记录日志，避免运维无法区分攻击与配置错误
 6. 确认防重放时间窗口的最终时长（当前5分钟为占位值），并评估是否需要区分"时间戳过老"与"时间戳来自未来"两种拒绝原因分别记日志，便于排查NTP时钟漂移类故障
 7. Waffo_Money接入真实订单流程前，需决策：是否对负数金额/非法货币码做输入校验并抛异常；是否需要为PHP_INT_MAX边界值和零小数货币分支补充防御性格式化
+8. WP_Transient_Event_Store接入真实webhook前，需确认Waffo webhook payload中eventId的实际格式与最大长度，评估是否超出WordPress transient key的191字符上限（当前"waffo_evt_"前缀+event_id直接拼接，未做长度保护/哈希），避免长event_id导致dedup key写入失败或截断冲突
 
 ---
 
