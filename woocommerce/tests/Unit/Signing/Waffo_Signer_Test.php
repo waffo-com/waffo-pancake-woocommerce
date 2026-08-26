@@ -61,4 +61,23 @@ class Waffo_Signer_Test extends TestCase
 
         $this->assertSame(1, $verified);
     }
+
+    public function test_sign_throws_on_invalid_private_key(): void
+    {
+        $signer = new Waffo_Signer('not a valid PEM key');
+
+        $this->expectException(\RuntimeException::class);
+
+        $signer->sign('GET', '/v1/orders/ORD_1', 1700000000000, '');
+    }
+
+    public function test_sign_is_case_insensitive_to_http_method(): void
+    {
+        $signer = new Waffo_Signer($this->private_key);
+
+        $signature_lower = $signer->sign('post', '/v1/actions/checkout/create-session', 1700000000000, '{"currency":"USD"}');
+        $signature_upper = $signer->sign('POST', '/v1/actions/checkout/create-session', 1700000000000, '{"currency":"USD"}');
+
+        $this->assertSame($signature_upper, $signature_lower);
+    }
 }

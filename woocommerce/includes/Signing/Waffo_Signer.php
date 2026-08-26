@@ -22,7 +22,9 @@ class Waffo_Signer
             throw new \RuntimeException('Invalid RSA private key');
         }
 
-        openssl_sign($canonical, $signature, $private_key, OPENSSL_ALGO_SHA256);
+        if (openssl_sign($canonical, $signature, $private_key, OPENSSL_ALGO_SHA256) === false) {
+            throw new \RuntimeException('Failed to sign request: ' . openssl_error_string());
+        }
 
         return base64_encode($signature);
     }
