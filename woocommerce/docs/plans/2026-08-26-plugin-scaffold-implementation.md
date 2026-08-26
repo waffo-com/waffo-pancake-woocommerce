@@ -981,6 +981,11 @@ git commit -m "feat: 添加插件入口与WC_Payment_Gateway骨架"
 7. Waffo_Money接入真实订单流程前，需决策：是否对负数金额/非法货币码做输入校验并抛异常；是否需要为PHP_INT_MAX边界值和零小数货币分支补充防御性格式化
 8. WP_Transient_Event_Store接入真实webhook前，需确认Waffo webhook payload中eventId的实际格式与最大长度，评估是否超出WordPress transient key的191字符上限（当前"waffo_evt_"前缀+event_id直接拼接，未做长度保护/哈希），避免长event_id导致dedup key写入失败或截断冲突
 
+**准入条件（Task 8 必须先完成以下两项，才能开始接入真实商户密钥/真实结账流程；未完成前不得放行商户输入真实私钥或触发真实checkout）：**
+
+9. `private_key`/`waffo_public_key` 两个设置字段当前用WooCommerce的`textarea`类型，会在每次打开支付设置页时把完整PEM私钥明文渲染进页面HTML源码（可被View Source、浏览器插件、表单恢复缓存等途径读取）。Task 8接入真实商户密钥前，必须先把这两个字段改为`type => 'password'`（或自定义的掩码渲染+留空保留原值模式），不能在此项完成前允许商户输入真实私钥。
+10. `process_payment()`当前用裸露的`throw new \Exception(...)`占位，WooCommerce结账流程对未捕获的通用Exception处理方式因版本和是否用Store API而异，可能导致糟糕的用户体验甚至在`WP_DEBUG`开启时泄露堆栈信息。Task 8接入真实`create-checkout-session`调用时，必须把这里改为`wc_add_notice($message, 'error'); return ['result' => 'fail'];`的WooCommerce标准错误处理模式，作为该任务的第一步修改，不能等到最后再处理。
+
 ---
 
 ## 执行后检查
