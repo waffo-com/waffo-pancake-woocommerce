@@ -33,4 +33,16 @@ class Waffo_Money_Test extends TestCase
     {
         $this->assertSame('2900', Waffo_Money::to_display_string(2900, 'JPY'));
     }
+
+    public function test_to_display_string_rounds_correctly(): void
+    {
+        // 经典浮点陷阱值：301/100在二进制浮点下不精确表示，回归验证number_format能正确舍入到2位小数
+        $this->assertSame('3.01', Waffo_Money::to_display_string(301, 'USD'));
+    }
+
+    public function test_to_display_string_handles_negative_amount(): void
+    {
+        // 锁定当前实际行为（负数金额未做输入校验，是否应该拒绝是后续设计决策，见Task 8跟进项）
+        $this->assertSame('-29.00', Waffo_Money::to_display_string(-2900, 'USD'));
+    }
 }
