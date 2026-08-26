@@ -976,6 +976,8 @@ git commit -m "feat: 添加插件入口与WC_Payment_Gateway骨架"
 2. 确认 webhook 平台公钥获取方式 → 把 `Waffo_Webhook_Verifier` 接入真实的 webhook REST 端点（`includes/Webhook/Waffo_Webhook_Controller.php`，注册 `register_rest_route`）
 3. 确认退款审核机制的真实行为 → 定稿 `process_refund()` 的用户提示文案和状态流转
 4. 用 test 环境密钥对，走通设计文档第 9 节的完整测试计划
+5. Webhook端点实现时需区分 `openssl_verify` 返回 `-1`（内部错误，如公钥损坏）与 `0`（验证失败/真实伪造）并分别记录日志，避免运维无法区分攻击与配置错误
+6. 确认防重放时间窗口的最终时长（当前5分钟为占位值），并评估是否需要区分"时间戳过老"与"时间戳来自未来"两种拒绝原因分别记日志，便于排查NTP时钟漂移类故障
 
 ---
 
