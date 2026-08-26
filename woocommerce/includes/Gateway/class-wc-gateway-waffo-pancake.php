@@ -1,4 +1,7 @@
 <?php
+// 文件名沿用WordPress传统的class-*.php惯例（而非其余类的PSR-4风格），
+// 因为WC_Payment_Gateway基类只在plugins_loaded之后才存在，此文件必须由
+// 插件入口手动require_once、不能走Composer autoload，命名差异是有意为之。
 namespace WaffoPancake\Gateway;
 
 if (!defined('ABSPATH')) {
