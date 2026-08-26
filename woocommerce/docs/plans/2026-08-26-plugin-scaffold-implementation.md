@@ -21,6 +21,8 @@
 
 **Step 1: 写 composer.json**
 
+> **执行记录（2026-08-26）：** 实际执行时发现 `phpunit/phpunit: ^10` 与 `10up/wp_mock: ^1.0`（该库所有已发布 1.x 版本均硬性要求 `phpunit/phpunit ^9.6`）存在不可满足的依赖冲突，`composer install` 会直接报错。已确认改为 `phpunit/phpunit: ^9.6`，与 wp_mock 兼容，且不影响后续任务（均不依赖 PHPUnit 10 专属特性）。下面的示例已更新为修正后的版本，**请勿再改回 `^10`**。
+
 ```json
 {
     "name": "waffo/waffo-pancake-woocommerce",
@@ -31,7 +33,7 @@
         "php": ">=8.1"
     },
     "require-dev": {
-        "phpunit/phpunit": "^10",
+        "phpunit/phpunit": "^9.6",
         "10up/wp_mock": "^1.0"
     },
     "autoload": {
