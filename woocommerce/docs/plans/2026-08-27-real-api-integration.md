@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 把骨架里的占位逻辑替换成真实的 Waffo Pancake API 调用：`Waffo_Api_Client`（RSA签名请求 + checkout session/order创建 + GraphQL兜底查询 + 退款）、webhook REST端点（内置公钥验签）、真实的 `process_payment`/`process_refund`、WP-Cron兜底轮询。同时清偿骨架实现计划 Task 8 清单里的10条跟进项。
+**Goal:** 把骨架里的占位逻辑替换成真实的 Waffo Pancake API 调用：`Waffo_Api_Client`（RSA签名请求 + checkout session/order创建 + GraphQL兜底查询 + 退款）、webhook REST端点（内置公钥验签）、真实的 `process_payment`/`process_refund`、商品编辑页的WC商品↔Waffo商品映射字段UI、WP-Cron兜底轮询。同时清偿骨架实现计划 Task 8 清单里的10条跟进项。
 
 **Architecture:** 沿用骨架阶段确立的分层：`includes/Signing/`（签名/验签，已完成）、`includes/Money/`（金额换算，已完成）、`includes/Dedup/`（去重，已完成）、`includes/Order/`（状态映射，已完成）新增 `includes/Api/`（REST客户端）、`includes/Webhook/`（REST端点控制器）、`includes/Cron/`（兜底轮询）。纯逻辑部分继续走PHPUnit+WP_Mock单元测试；`WC_Gateway_Waffo_Pancake` 里新增的方法因依赖`WC_Payment_Gateway`/`WC_Order`基类，同前次任务只做`php -l`语法检查，不强行mock整个WooCommerce订单模型。
 
@@ -881,7 +881,83 @@ git add includes/Gateway/class-wc-gateway-waffo-pancake.php
 git commit -m "feat: process_payment真实接入create-checkout-session（清偿准入条件#10）"
 ```
 
-**重要说明**：`resolve_waffo_product_id()`里的WooCommerce商品↔Waffo商品映射方案是**新发现的未决设计问题**，之前的设计文档和骨架计划都没有覆盖"WC商品目录如何对应到Waffo后台已创建的商品"这件事。这里先用一个临时约定（商品自定义字段`_waffo_product_id`）让代码能跑，但这不是最终方案，必须在真实商户测试前和业务方确认：是否要做一个后台映射管理界面、还是自动按SKU匹配、还是别的方式。已经记录进Task 8待办清单（见本文档末尾）。
+**方案确认（2026-08-28）**：WooCommerce商品↔Waffo商品的映射方式已定案为**商品自定义字段`_waffo_product_id`，商户在每个WC商品编辑页手动填写**。这不是临时占位，是正式方案——调研了Paddle/Lemon Squeezy等同为Merchant-of-Record模式的WooCommerce插件生态（Lemon Squeezy的GrandPlugins插件是已核实的确证案例），业界标准做法就是这种显式、逐商品手动填写的自定义字段，而非自动按SKU匹配或全自动同步：MoR平台的第三方商品记录通常绑定税务分类、发票文案等，出错有合规风险，不适合做成商户看不见的黑盒自动映射。`resolve_waffo_product_id()`这里的实现方式已经是最终形态，不需要再改。真正缺失的是**商品编辑页里让商户能填写这个字段的UI**，见新增的Task 6.5。
+
+---
+
+### Task 6.5: 商品编辑页添加 `_waffo_product_id` 自定义字段UI
+
+**Files:**
+- Create: `includes/Product/Waffo_Product_Fields.php`
+
+这部分依赖WooCommerce的`WC_Product`/后台产品编辑页渲染钩子，无法在纯PHPUnit环境实例化验证，同Gateway任务一样只做`php -l`语法检查，遵循调研确认的WooCommerce标准写法（`woocommerce_product_options_general_product_data` + `woocommerce_process_product_meta`钩子，这是Lemon Squeezy生态插件和Meta官方WooCommerce插件共用的标准机制）。
+
+**Step 1: 编写实现**
+
+```php
+<?php
+namespace WaffoPancake\Product;
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class Waffo_Product_Fields
+{
+    public static function register(): void
+    {
+        add_action('woocommerce_product_options_general_product_data', [self::class, 'render_field']);
+        add_action('woocommerce_process_product_meta', [self::class, 'save_field']);
+    }
+
+    public static function render_field(): void
+    {
+        global $post;
+
+        woocommerce_wp_text_input([
+            'id'          => '_waffo_product_id',
+            'label'       => 'Waffo Product ID',
+            'description' => 'The corresponding product ID (PROD_xxx) created in your Waffo Dashboard. Required to accept payments for this product via Waffo Pancake.',
+            'desc_tip'    => true,
+            'value'       => get_post_meta($post->ID, '_waffo_product_id', true),
+        ]);
+    }
+
+    public static function save_field(int $post_id): void
+    {
+        if (isset($_POST['_waffo_product_id'])) {
+            update_post_meta($post_id, '_waffo_product_id', sanitize_text_field(wp_unslash($_POST['_waffo_product_id'])));
+        }
+    }
+}
+```
+
+**Step 2: 在插件入口注册**
+
+在 `waffo-pancake-woocommerce.php` 的 `plugins_loaded` 回调里追加：
+
+```php
+    require_once WAFFO_PANCAKE_WC_PLUGIN_DIR . 'includes/Product/Waffo_Product_Fields.php';
+    \WaffoPancake\Product\Waffo_Product_Fields::register();
+```
+
+**Step 3: 语法验证**
+
+Run: `php -l includes/Product/Waffo_Product_Fields.php && php -l waffo-pancake-woocommerce.php`
+Expected: `No syntax errors detected` ×2
+
+**Step 4: 全量测试确认无回归**
+
+Run: `composer test`
+
+**Step 5: Commit**
+
+```bash
+git add includes/Product/ waffo-pancake-woocommerce.php
+git commit -m "feat: 商品编辑页添加Waffo Product ID映射字段"
+```
+
+**安全说明**：`save_field()`用了`sanitize_text_field(wp_unslash(...))`是WordPress处理`$_POST`用户输入的标准安全写法（防止存储型XSS/保留原始引号转义前的内容），保存时机在`woocommerce_process_product_meta`钩子里，WooCommerce核心已经在这个钩子触发前做了nonce校验，不需要在这里重复校验nonce。
 
 ---
 
@@ -1152,8 +1228,8 @@ git commit -m "feat: 插件入口注册webhook端点，接通事件→订单状�
 **Step 2: 新增本轮调研发现的新跟进项**
 
 追加以下条目：
-- "WooCommerce商品目录与Waffo商品(`productId`)的映射方案尚未定案，当前用商品自定义字段`_waffo_product_id`作为临时约定（见Task 6），需要与业务方确认最终方案（后台映射界面/SKU自动匹配/其他）"
-- "`resolve_waffo_product_id()`未配置时会在结账时才报错，用户体验较差，正式上线前应该在商户后台设置页加一个『检测未配置Waffo商品』的诊断工具或强制校验"
+- "WooCommerce商品↔Waffo商品的映射方案已定案（2026-08-28）：商户自定义字段`_waffo_product_id`，Task 6.5已实现商品编辑页UI，参照Lemon Squeezy等MoR类插件的业界惯例。此项已清偿，不再是待办。"
+- "`resolve_waffo_product_id()`未配置时会在结账时才报错，用户体验较差，正式上线前应该在商户后台设置页加一个『检测未配置Waffo商品』的诊断工具或强制校验（仍待办，Task 6.5只解决了"能填"，没解决"忘记填时如何提前提醒"）"
 - "webhook端点的`permission_callback`当前是`__return_true`（因为认证靠签名验证，不是WordPress权限系统），需要在真实环境确认这不会被WordPress其他安全插件/防火墙规则误拦截"
 
 **Step 3: Commit**
