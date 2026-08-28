@@ -165,4 +165,67 @@ class Waffo_Api_Client_Test extends TestCase
         $this->assertTrue((new Waffo_Api_Exception('Too many requests', 429))->is_retryable());
         $this->assertFalse((new Waffo_Api_Exception('Bad request', 400))->is_retryable());
     }
+
+    public function test_create_checkout_session_posts_expected_payload(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        \WP_Mock::userFunction('wp_remote_post')
+            ->once()
+            ->with(
+                'https://api.test.waffo.ai/v1/actions/checkout/create-session',
+                \Mockery::on(function ($args) {
+                    $decoded = json_decode($args['body'], true);
+                    return $decoded['productId'] === 'PROD_1'
+                        && $decoded['currency'] === 'USD'
+                        && $decoded['orderMerchantExternalId'] === 'wc_order_42'
+                        && $decoded['successUrl'] === 'https://shop.example.com/thank-you';
+                })
+            )
+            ->andReturn(['response' => ['code' => 200], 'body' => '{"data":{"sessionId":"cs_1","checkoutUrl":"https://pancake.waffo.ai/x","expiresAt":"2026-01-01T00:00:00Z"}}']);
+
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn('{"data":{"sessionId":"cs_1","checkoutUrl":"https://pancake.waffo.ai/x","expiresAt":"2026-01-01T00:00:00Z"}}');
+
+        $client = $this->make_client();
+
+        $result = $client->create_checkout_session([
+            'productId' => 'PROD_1',
+            'currency' => 'USD',
+            'orderMerchantExternalId' => 'wc_order_42',
+            'successUrl' => 'https://shop.example.com/thank-you',
+        ]);
+
+        $this->assertSame('https://pancake.waffo.ai/x', $result['checkoutUrl']);
+    }
+
+    public function test_create_refund_ticket_posts_expected_payload(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        \WP_Mock::userFunction('wp_remote_post')
+            ->once()
+            ->with(
+                'https://api.test.waffo.ai/v1/actions/refund-ticket/create-ticket',
+                \Mockery::on(function ($args) {
+                    $decoded = json_decode($args['body'], true);
+                    return $decoded['paymentId'] === 'PAY_1' && $decoded['requestedAmount']['amount'] === '10.00';
+                })
+            )
+            ->andReturn(['response' => ['code' => 200], 'body' => '{"data":{"ticketId":"RFT_1","status":"pending"}}']);
+
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn('{"data":{"ticketId":"RFT_1","status":"pending"}}');
+
+        $client = $this->make_client();
+
+        $result = $client->create_refund_ticket('PAY_1', '10.00', 'USD', 'Customer requested refund');
+
+        $this->assertSame('RFT_1', $result['ticketId']);
+        $this->assertSame('pending', $result['status']);
+    }
 }

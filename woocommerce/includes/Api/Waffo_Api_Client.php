@@ -39,6 +39,36 @@ class Waffo_Api_Client
         ]);
     }
 
+    public function create_checkout_session(array $payload): array
+    {
+        $response = $this->post('/v1/actions/checkout/create-session', $payload);
+        return $response['data'];
+    }
+
+    public function issue_session_token(array $payload): array
+    {
+        $response = $this->post('/v1/actions/auth/issue-session-token', $payload);
+        return $response['data'];
+    }
+
+    public function create_refund_ticket(string $payment_id, string $amount, string $currency, string $reason): array
+    {
+        $response = $this->post('/v1/actions/refund-ticket/create-ticket', [
+            'paymentId' => $payment_id,
+            'requestedAmount' => ['amount' => $amount, 'currency' => $currency],
+            'reason' => $reason,
+        ]);
+
+        return $response['data'];
+    }
+
+    public function query_order_status(string $order_id): array
+    {
+        $query = 'query { onetimeOrder(id: "' . $order_id . '") { id status } }';
+        $response = $this->post('/v1/graphql', ['query' => $query]);
+        return $response['data']['onetimeOrder'] ?? [];
+    }
+
     private function signed_headers(string $method, string $path, string $body): array
     {
         $timestamp_ms = ($this->clock)();
