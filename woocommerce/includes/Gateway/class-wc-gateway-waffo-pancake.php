@@ -58,13 +58,8 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
             ],
             'private_key' => [
                 'title'       => 'Private Key (PEM)',
-                'type'        => 'textarea',
-                'description' => 'RSA private key generated in Waffo Dashboard. Kept confidential.',
-            ],
-            'waffo_public_key' => [
-                'title'       => 'Waffo Public Key (PEM)',
-                'type'        => 'textarea',
-                'description' => 'Used to verify webhook signatures. (待确认：官方公钥获取渠道，见设计文档第10节)',
+                'type'        => 'password',
+                'description' => 'RSA private key generated in Waffo Dashboard. Stored encrypted at rest is recommended; never logged or displayed in plaintext after initial entry.',
             ],
             'debug' => [
                 'title'   => 'Debug Log',
