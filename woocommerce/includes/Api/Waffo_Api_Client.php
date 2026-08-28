@@ -8,12 +8,15 @@ class Waffo_Api_Client
     private Waffo_Signer $signer;
     private string $merchant_id;
     private string $base_url;
+    /** @var callable */
+    private $clock;
 
-    public function __construct(Waffo_Signer $signer, string $merchant_id, string $base_url)
+    public function __construct(Waffo_Signer $signer, string $merchant_id, string $base_url, ?callable $clock = null)
     {
         $this->signer = $signer;
         $this->merchant_id = $merchant_id;
         $this->base_url = rtrim($base_url, '/');
+        $this->clock = $clock ?? fn () => (int) round(microtime(true) * 1000);
     }
 
     public function post(string $path, array $body): array
@@ -38,7 +41,7 @@ class Waffo_Api_Client
 
     private function signed_headers(string $method, string $path, string $body): array
     {
-        $timestamp_ms = (int) round(microtime(true) * 1000);
+        $timestamp_ms = ($this->clock)();
 
         return [
             'Content-Type'  => 'application/json',
@@ -71,6 +74,7 @@ class Waffo_Api_Client
             $message = $first_error['message'] ?? ('Waffo API request failed with status ' . $status_code);
             $error_code = $first_error['code'] ?? null;
 
+            // 调用方捕获此异常时，记录日志请脱敏请求/响应体中的支付凭证等敏感字段，避免泄漏到日志系统。
             throw new Waffo_Api_Exception($message, $status_code, $error_code);
         }
 

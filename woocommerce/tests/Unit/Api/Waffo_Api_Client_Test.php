@@ -21,10 +21,10 @@ class Waffo_Api_Client_Test extends TestCase
         \WP_Mock::tearDown();
     }
 
-    private function make_client(string $base_url = 'https://api.test.waffo.ai'): Waffo_Api_Client
+    private function make_client(string $base_url = 'https://api.test.waffo.ai', ?callable $clock = null): Waffo_Api_Client
     {
         $signer = new Waffo_Signer($this->private_key);
-        return new Waffo_Api_Client($signer, 'MER_test123', $base_url);
+        return new Waffo_Api_Client($signer, 'MER_test123', $base_url, $clock);
     }
 
     public function test_post_sends_signed_headers_and_returns_decoded_body(): void
@@ -132,5 +132,37 @@ class Waffo_Api_Client_Test extends TestCase
         $result = $client->get('/v1/graphql?query=x');
 
         $this->assertSame([], $result['data']);
+    }
+
+    public function test_injected_clock_produces_predictable_timestamp(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        $captured_args = null;
+
+        \WP_Mock::userFunction('wp_remote_post')
+            ->once()
+            ->andReturnUsing(function ($url, $args) use (&$captured_args) {
+                $captured_args = $args;
+                return ['response' => ['code' => 200], 'body' => '{"data":{}}'];
+            });
+
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn('{"data":{}}');
+
+        $client = $this->make_client('https://api.test.waffo.ai', fn () => 1700000000000);
+
+        $client->post('/v1/actions/checkout/create-session', []);
+
+        $this->assertSame('1700000000000', $captured_args['headers']['X-Timestamp']);
+    }
+
+    public function test_is_retryable_reflects_status_code(): void
+    {
+        $this->assertTrue((new Waffo_Api_Exception('Server error', 500))->is_retryable());
+        $this->assertTrue((new Waffo_Api_Exception('Too many requests', 429))->is_retryable());
+        $this->assertFalse((new Waffo_Api_Exception('Bad request', 400))->is_retryable());
     }
 }
