@@ -53,11 +53,10 @@ class Waffo_Webhook_Controller_Test extends TestCase
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=bad');
         $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_1"}');
 
-        \WP_Mock::userFunction('rest_ensure_response')->andReturnUsing(fn ($data) => $data);
-
         $response = $controller->handle($request);
 
-        $this->assertSame(401, $response['status'] ?? null);
+        $this->assertInstanceOf(\WP_REST_Response::class, $response);
+        $this->assertSame(401, $response->get_status());
     }
 
     public function test_handle_returns_200_and_skips_processing_on_duplicate_event(): void
@@ -78,11 +77,10 @@ class Waffo_Webhook_Controller_Test extends TestCase
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
         $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_1","eventType":"order.completed"}');
 
-        \WP_Mock::userFunction('rest_ensure_response')->andReturnUsing(fn ($data) => $data);
-
         $response = $controller->handle($request);
 
-        $this->assertSame(200, $response['status'] ?? null);
+        $this->assertInstanceOf(\WP_REST_Response::class, $response);
+        $this->assertSame(200, $response->get_status());
         $this->assertEmpty($processed, '重复事件不应触发处理回调');
     }
 
@@ -103,11 +101,10 @@ class Waffo_Webhook_Controller_Test extends TestCase
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
         $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_2","eventType":"order.completed"}');
 
-        \WP_Mock::userFunction('rest_ensure_response')->andReturnUsing(fn ($data) => $data);
-
         $response = $controller->handle($request);
 
-        $this->assertSame(200, $response['status'] ?? null);
+        $this->assertInstanceOf(\WP_REST_Response::class, $response);
+        $this->assertSame(200, $response->get_status());
         $this->assertCount(1, $processed);
         $this->assertSame('PAY_2', $processed[0]['eventId']);
         $this->assertTrue($dedup->is_duplicate('PAY_2'));
@@ -125,10 +122,50 @@ class Waffo_Webhook_Controller_Test extends TestCase
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
         $request->shouldReceive('get_body')->andReturn('not json');
 
-        \WP_Mock::userFunction('rest_ensure_response')->andReturnUsing(fn ($data) => $data);
+        $response = $controller->handle($request);
+
+        $this->assertInstanceOf(\WP_REST_Response::class, $response);
+        $this->assertSame(400, $response->get_status());
+    }
+
+    public function test_handle_returns_500_and_does_not_mark_processed_when_on_event_throws(): void
+    {
+        $verifier = \Mockery::mock(Waffo_Webhook_Verifier::class);
+        $verifier->shouldReceive('verify')->once()->andReturn(true);
+
+        $store = new In_Memory_Event_Store();
+        $dedup = new Waffo_Event_Deduplicator($store);
+
+        $controller = new Waffo_Webhook_Controller($verifier, $dedup, function (array $event) {
+            throw new \RuntimeException('downstream order update failed');
+        });
+
+        $request = \Mockery::mock('WP_REST_Request');
+        $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
+        $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_3","eventType":"order.completed"}');
 
         $response = $controller->handle($request);
 
-        $this->assertSame(400, $response['status'] ?? null);
+        $this->assertInstanceOf(\WP_REST_Response::class, $response);
+        $this->assertSame(500, $response->get_status());
+        $this->assertFalse($dedup->is_duplicate('PAY_3'), '处理失败的事件不应被标记为已处理，需保留at-least-once重试语义');
+    }
+
+    public function test_handle_returns_400_when_event_id_is_not_a_string(): void
+    {
+        $verifier = \Mockery::mock(Waffo_Webhook_Verifier::class);
+        $verifier->shouldReceive('verify')->once()->andReturn(true);
+        $dedup = new Waffo_Event_Deduplicator(new In_Memory_Event_Store());
+
+        $controller = $this->make_controller($verifier, $dedup);
+
+        $request = \Mockery::mock('WP_REST_Request');
+        $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
+        $request->shouldReceive('get_body')->andReturn('{"eventId":12345,"eventType":"order.completed"}');
+
+        $response = $controller->handle($request);
+
+        $this->assertInstanceOf(\WP_REST_Response::class, $response);
+        $this->assertSame(400, $response->get_status());
     }
 }

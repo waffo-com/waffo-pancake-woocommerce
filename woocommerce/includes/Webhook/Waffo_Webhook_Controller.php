@@ -35,21 +35,27 @@ class Waffo_Webhook_Controller
         $raw_body = $request->get_body();
 
         if (!$this->verifier->verify($signature_header, $raw_body)) {
-            return rest_ensure_response(['status' => 401, 'message' => 'Invalid webhook signature']);
+            return new \WP_REST_Response(['message' => 'Invalid webhook signature'], 401);
         }
 
         $event = json_decode($raw_body, true);
-        if (!is_array($event) || !isset($event['eventId'])) {
-            return rest_ensure_response(['status' => 400, 'message' => 'Malformed webhook payload']);
+        if (!is_array($event) || !isset($event['eventId']) || !is_string($event['eventId'])) {
+            return new \WP_REST_Response(['message' => 'Malformed webhook payload'], 400);
         }
 
         if ($this->dedup->is_duplicate($event['eventId'])) {
-            return rest_ensure_response(['status' => 200, 'message' => 'Duplicate event, already processed']);
+            return new \WP_REST_Response(['message' => 'Duplicate event, already processed'], 200);
         }
 
-        ($this->on_event)($event);
+        try {
+            ($this->on_event)($event);
+        } catch (\Throwable $e) {
+            error_log('Waffo webhook on_event handler failed: ' . $e->getMessage());
+            return new \WP_REST_Response(['message' => 'Internal error processing webhook'], 500);
+        }
+
         $this->dedup->mark_processed($event['eventId']);
 
-        return rest_ensure_response(['status' => 200, 'message' => 'ok']);
+        return new \WP_REST_Response(['message' => 'ok'], 200);
     }
 }
