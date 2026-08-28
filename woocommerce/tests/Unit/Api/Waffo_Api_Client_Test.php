@@ -228,4 +228,60 @@ class Waffo_Api_Client_Test extends TestCase
         $this->assertSame('RFT_1', $result['ticketId']);
         $this->assertSame('pending', $result['status']);
     }
+
+    public function test_query_order_status_uses_parameterized_graphql_variables(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        \WP_Mock::userFunction('wp_remote_post')
+            ->once()
+            ->with(
+                'https://api.test.waffo.ai/v1/graphql',
+                \Mockery::on(function ($args) {
+                    $decoded = json_decode($args['body'], true);
+                    return strpos($decoded['query'], '$id') !== false
+                        && strpos($decoded['query'], '"') === false
+                        && $decoded['variables']['id'] === 'ORDER_"}_injected';
+                })
+            )
+            ->andReturn(['response' => ['code' => 200], 'body' => '{"data":{"onetimeOrder":{"id":"ORDER_\"}_injected","status":"paid"}}}']);
+
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn('{"data":{"onetimeOrder":{"id":"ORDER_\"}_injected","status":"paid"}}}');
+
+        $client = $this->make_client();
+
+        $result = $client->query_order_status('ORDER_"}_injected');
+
+        $this->assertSame('paid', $result['status']);
+    }
+
+    public function test_issue_session_token_forwards_payload_and_returns_data(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        \WP_Mock::userFunction('wp_remote_post')
+            ->once()
+            ->with(
+                'https://api.test.waffo.ai/v1/actions/auth/issue-session-token',
+                \Mockery::on(function ($args) {
+                    $decoded = json_decode($args['body'], true);
+                    return $decoded['customerId'] === 'CUST_1';
+                })
+            )
+            ->andReturn(['response' => ['code' => 200], 'body' => '{"data":{"sessionToken":"tok_1"}}']);
+
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn('{"data":{"sessionToken":"tok_1"}}');
+
+        $client = $this->make_client();
+
+        $result = $client->issue_session_token(['customerId' => 'CUST_1']);
+
+        $this->assertSame('tok_1', $result['sessionToken']);
+    }
 }

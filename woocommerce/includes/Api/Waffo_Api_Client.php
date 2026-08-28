@@ -39,18 +39,32 @@ class Waffo_Api_Client
         ]);
     }
 
+    /**
+     * 创建收银台checkout session，供process_payment真实实现调用以获取跳转用的hosted URL。
+     */
     public function create_checkout_session(array $payload): array
     {
         $response = $this->post('/v1/actions/checkout/create-session', $payload);
         return $response['data'];
     }
 
+    /**
+     * 为Customer Session Token预留，收银台前端鉴权场景，当前无调用方。
+     * 插件当前设计走商户服务端直接创建checkout session拿hosted URL跳转，
+     * 不需要走Customer Session Token这条路径；保留此方法以便未来该场景启用时可直接复用。
+     */
     public function issue_session_token(array $payload): array
     {
         $response = $this->post('/v1/actions/auth/issue-session-token', $payload);
         return $response['data'];
     }
 
+    /**
+     * 创建退款工单，供process_refund真实实现调用。
+     *
+     * @param string $amount 必须用 Waffo_Money::to_display_string() 生成，不要手工拼接，
+     *                        尤其零小数货币（如JPY）没有小数位，手工拼接容易出错。
+     */
     public function create_refund_ticket(string $payment_id, string $amount, string $currency, string $reason): array
     {
         $response = $this->post('/v1/actions/refund-ticket/create-ticket', [
@@ -62,10 +76,17 @@ class Waffo_Api_Client
         return $response['data'];
     }
 
+    /**
+     * 查询订单状态，供WP-Cron兜底轮询任务调用。使用GraphQL variables参数化传参，
+     * 避免订单ID中出现的特殊字符（如双引号、花括号）破坏query语法或引入注入风险。
+     */
     public function query_order_status(string $order_id): array
     {
-        $query = 'query { onetimeOrder(id: "' . $order_id . '") { id status } }';
-        $response = $this->post('/v1/graphql', ['query' => $query]);
+        $query = 'query GetOrderStatus($id: ID!) { onetimeOrder(id: $id) { id status } }';
+        $response = $this->post('/v1/graphql', [
+            'query' => $query,
+            'variables' => ['id' => $order_id],
+        ]);
         return $response['data']['onetimeOrder'] ?? [];
     }
 
