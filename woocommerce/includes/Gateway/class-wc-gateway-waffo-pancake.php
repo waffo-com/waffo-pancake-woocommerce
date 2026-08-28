@@ -154,7 +154,7 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
             }
         }
 
-        throw new \WaffoPancake\Api\Waffo_Api_Exception('No Waffo product mapping found for this order. Configure "_waffo_product_id" on the product.');
+        throw new \WaffoPancake\Api\Waffo_Api_Exception('No Waffo product mapping found for this order. Configure "_waffo_product_id" on the product (variable/variation products are not yet supported).');
     }
 
     public function process_refund($order_id, $amount = null, $reason = ''): bool|\WP_Error

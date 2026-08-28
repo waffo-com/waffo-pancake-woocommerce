@@ -20,7 +20,7 @@ class Waffo_Product_Fields
         woocommerce_wp_text_input([
             'id'          => '_waffo_product_id',
             'label'       => 'Waffo Product ID',
-            'description' => 'The corresponding product ID (PROD_xxx) created in your Waffo Dashboard. Required to accept payments for this product via Waffo Pancake.',
+            'description' => 'The corresponding product ID (PROD_xxx) created in your Waffo Dashboard. Required to accept payments for this product via Waffo Pancake. Note: not yet supported for variable products with multiple variations — configure on simple/virtual products only.',
             'desc_tip'    => true,
             'value'       => get_post_meta($post->ID, '_waffo_product_id', true),
         ]);
@@ -28,8 +28,17 @@ class Waffo_Product_Fields
 
     public static function save_field(int $post_id): void
     {
-        if (isset($_POST['_waffo_product_id'])) {
-            update_post_meta($post_id, '_waffo_product_id', sanitize_text_field(wp_unslash($_POST['_waffo_product_id'])));
+        if (!isset($_POST['_waffo_product_id'])) {
+            return;
         }
+
+        $value = sanitize_text_field(wp_unslash($_POST['_waffo_product_id']));
+
+        if ($value === '') {
+            delete_post_meta($post_id, '_waffo_product_id');
+            return;
+        }
+
+        update_post_meta($post_id, '_waffo_product_id', $value);
     }
 }
