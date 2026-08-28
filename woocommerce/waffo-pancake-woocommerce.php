@@ -31,4 +31,7 @@ add_action('plugins_loaded', function () {
         $gateways[] = \WaffoPancake\Gateway\WC_Gateway_Waffo_Pancake::class;
         return $gateways;
     });
+
+    require_once WAFFO_PANCAKE_WC_PLUGIN_DIR . 'includes/Product/Waffo_Product_Fields.php';
+    \WaffoPancake\Product\Waffo_Product_Fields::register();
 });
