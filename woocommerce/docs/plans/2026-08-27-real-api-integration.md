@@ -959,6 +959,95 @@ git commit -m "feat: 商品编辑页添加Waffo Product ID映射字段"
 
 **安全说明**：`save_field()`用了`sanitize_text_field(wp_unslash(...))`是WordPress处理`$_POST`用户输入的标准安全写法（防止存储型XSS/保留原始引号转义前的内容），保存时机在`woocommerce_process_product_meta`钩子里，WooCommerce核心已经在这个钩子触发前做了nonce校验，不需要在这里重复校验nonce。
 
+**已知限制（2026-08-28确认，v1不修复）**：variable product（多变体商品）的每个variation无法单独配置`_waffo_product_id`，v1场景聚焦虚拟商品，业务方确认不需要支持variable product，已在字段description和`resolve_waffo_product_id()`异常信息里做了明确提示。
+
+---
+
+### Task 6.6: `process_payment()` 支持动态价格覆盖（`priceSnapshot`）
+
+**背景**：调研确认Waffo的`create-checkout-session`接口支持`priceSnapshot`字段，可以在下单时动态指定/覆盖本次交易的实际收费金额，而不是完全依赖Waffo后台商品配置的固定价格。这对虚拟商品的自定义金额、打赏、可变价格场景是必需的。
+
+**关键约束（务必遵守，否则会引入价格篡改漏洞）**：
+- `priceSnapshot`只在**API Key（商户/服务端）认证**下生效，Store Slug（访客/前端直连）认证会被Waffo后端静默忽略——我们的插件本来就是走商户API Key路径（`Waffo_Api_Client`用RSA签名），符合这个前提，不需要额外改造认证方式。
+- `priceSnapshot.amount`是**显示格式的十进制字符串**（如`"29.00"`），不是分为单位的整数，必须用骨架阶段已实现的`Waffo_Money::to_display_string()`从WC订单的分为单位金额转换而来，不要手工拼接字符串（容易在货币精度/零小数货币场景出错，骨架计划Task 8清单第7条已经记录了`Waffo_Money`接入真实流程前的输入校验待办，本任务不重复处理那部分，只确保调用方式正确）。
+- 这个字段必须只能由服务端（本插件的PHP代码）构造并通过签名请求发送，绝不能允许任何客户端可控的原始值未经服务端验证直接透传成`priceSnapshot.amount`——本任务里金额始终来自`$order->get_total()`（WooCommerce服务端计算好的订单总额，不是用户表单直接提交的数字），符合这个安全要求。
+
+**Files:**
+- Modify: `includes/Api/Waffo_Api_Client.php`（`create_checkout_session`方法本身不需要改，`priceSnapshot`作为payload的一部分透传即可，只需确认现有实现不会过滤掉未在文档示例里出现的字段）
+- Modify: `includes/Gateway/class-wc-gateway-waffo-pancake.php`（`process_payment()`里构造`priceSnapshot`）
+
+**Step 1: 确认`Waffo_Api_Client::create_checkout_session()`透传任意payload字段**
+
+读取`includes/Api/Waffo_Api_Client.php`里`create_checkout_session(array $payload): array`的实现，确认它是直接把`$payload`原样传给`post()`（没有做白名单字段过滤）。如果确实是原样透传（大概率是，因为它是骨架实现里的薄封装），这一步不需要改代码，只需要在自我审查里明确记录"已确认此方法透传任意字段，加`priceSnapshot`无需修改这个类"。如果发现有字段白名单/过滤逻辑，需要先在这里补充讨论，不要直接假设。
+
+**Step 2: 修改`process_payment()`，构造并传入`priceSnapshot`**
+
+在`create_checkout_session()`调用的payload里增加`priceSnapshot`字段：
+
+```php
+            $session = $client->create_checkout_session([
+                'productId'               => $this->resolve_waffo_product_id($order),
+                'currency'                => $order->get_currency(),
+                'orderMerchantExternalId' => (string) $order_id,
+                'buyerEmail'              => $order->get_billing_email(),
+                'successUrl'              => $this->get_return_url($order),
+                'priceSnapshot'           => [
+                    'amount'       => $this->build_price_snapshot_amount($order),
+                    'taxIncluded'  => true,
+                    'taxCategory'  => $this->get_option('waffo_tax_category', 'digital_goods'),
+                ],
+            ]);
+```
+
+新增private方法：
+
+```php
+    private function build_price_snapshot_amount(\WC_Order $order): string
+    {
+        $currency = $order->get_currency();
+        $divisor = \WaffoPancake\Money\Waffo_Money::minor_unit_divisor($currency);
+        $minor_amount = (int) round((float) $order->get_total() * $divisor);
+
+        return \WaffoPancake\Money\Waffo_Money::to_display_string($minor_amount, $currency);
+    }
+```
+
+**关于`taxIncluded`和`taxCategory`的说明（待确认项，先用保守默认值）**：
+- `taxIncluded => true`：假设WooCommerce订单总额（`get_total()`）已经是含税价（这是WooCommerce的常见配置方式，取决于商户后台"Prices entered with tax"设置），这个假设**未经业务方最终确认**，如果商户的WC是配置成"不含税价格"，这里会导致税额计算错误（多收或少收税）。这是一个需要标注的跟进项，不是本任务能在没有更多商户税务配置信息的情况下彻底解决的。
+- `taxCategory`：用了一个新的可配置项`waffo_tax_category`（需要在`init_form_fields()`里补充这个后台设置字段，默认值`digital_goods`，因为当前产品定位是虚拟商品），商户可以在后台配置自己的税务分类。这个字段的合法值需要参照Waffo Dashboard里税务分类的实际选项（本次调研没有获取到完整的合法值列表），先用文本输入框，不做下拉枚举校验。
+
+**Step 3: 在`init_form_fields()`补充`waffo_tax_category`设置字段**
+
+```php
+            'waffo_tax_category' => [
+                'title'       => 'Waffo Tax Category',
+                'type'        => 'text',
+                'description' => 'Tax category for pricing (e.g. "digital_goods", "saas"). See your Waffo Dashboard for valid values.',
+                'default'     => 'digital_goods',
+            ],
+```
+
+**Step 4: 语法验证**
+
+Run: `php -l includes/Gateway/class-wc-gateway-waffo-pancake.php`
+Expected: `No syntax errors detected`
+
+**Step 5: 全量测试确认无回归**
+
+Run: `composer test`
+
+**Step 6: Commit**
+
+```bash
+git add includes/Gateway/class-wc-gateway-waffo-pancake.php
+git commit -m "feat: process_payment支持通过priceSnapshot动态覆盖交易金额"
+```
+
+**本任务范围外、需要记录到Task 8清单的跟进项**：
+- `taxIncluded => true`是否符合商户实际WC税务配置（含税价 vs 不含税价），需要业务方确认，当前是保守默认假设，不是已验证的正确行为
+- `taxCategory`的合法值范围未知（本次调研未获取完整列表），当前用自由文本输入，如果商户填错值，Waffo API大概率会返回400错误，但错误提示对商户是否友好未经真实环境验证
+- 如果商户的商品本身在Waffo后台已经配置了准确的价格和税务规则，本任务的改动会让**所有订单**都走`priceSnapshot`覆盖路径（即使金额和商品原价完全相同也会覆盖），这在功能上无害（覆盖成一样的值等于没覆盖），但意味着"控制这次交易最终什么价格生效"这件事完全转移到了WooCommerce订单总额上，商户后续如果只改Waffo后台商品价格而不同步注意WC商品价格，可能会困惑"为什么改了Waffo价格没生效"——这是一个值得在插件文档里说明的行为差异，非代码缺陷。
+
 ---
 
 ### Task 7: `process_refund()` 真实实现
