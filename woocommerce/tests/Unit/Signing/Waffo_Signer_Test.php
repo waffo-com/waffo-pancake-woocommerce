@@ -2,6 +2,7 @@
 namespace WaffoPancake\Tests\Unit\Signing;
 
 use PHPUnit\Framework\TestCase;
+use WaffoPancake\Api\Waffo_Api_Exception;
 use WaffoPancake\Signing\Waffo_Signer;
 
 class Waffo_Signer_Test extends TestCase
@@ -66,7 +67,7 @@ class Waffo_Signer_Test extends TestCase
     {
         $signer = new Waffo_Signer('not a valid PEM key');
 
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(Waffo_Api_Exception::class);
 
         $signer->sign('GET', '/v1/orders/ORD_1', 1700000000000, '');
     }

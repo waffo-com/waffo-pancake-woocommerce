@@ -98,9 +98,36 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
                 'redirect' => $session['checkoutUrl'],
             ];
         } catch (\WaffoPancake\Api\Waffo_Api_Exception $e) {
-            wc_add_notice('Payment could not be started: ' . $e->getMessage(), 'error');
+            $this->log_payment_error($order_id, sprintf(
+                '%s (status=%d, error_code=%s)',
+                $e->getMessage(),
+                $e->getStatusCode(),
+                $e->getErrorCode() ?? 'n/a'
+            ));
+            wc_add_notice('Payment could not be started. Please try again or contact the store.', 'error');
+            return ['result' => 'fail'];
+        } catch (\Throwable $e) {
+            // 纵深防御：捕获任何未预期的本地/运行时错误（例如未来新增的校验类型），
+            // 避免绕过上面的Waffo_Api_Exception catch导致未捕获异常直达买家浏览器。
+            $this->log_payment_error($order_id, $e->getMessage());
+            wc_add_notice('Payment could not be started. Please try again or contact the store.', 'error');
             return ['result' => 'fail'];
         }
+    }
+
+    private function log_payment_error(int $order_id, string $detail): void
+    {
+        // 详细错误信息只写日志供商户/开发者排查，绝不通过wc_add_notice展示给买家，
+        // 避免泄漏上游API的原始错误文案或未来可能包含的诊断细节。
+        if (function_exists('wc_get_logger')) {
+            wc_get_logger()->error(
+                sprintf('[waffo_pancake] process_payment failed for order #%d: %s', $order_id, $detail),
+                ['source' => 'waffo_pancake']
+            );
+            return;
+        }
+
+        error_log(sprintf('[waffo_pancake] process_payment failed for order #%d: %s', $order_id, $detail));
     }
 
     private function build_api_client(): \WaffoPancake\Api\Waffo_Api_Client
