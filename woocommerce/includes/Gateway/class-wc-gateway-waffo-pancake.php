@@ -61,6 +61,12 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
                 'type'        => 'password',
                 'description' => 'RSA private key generated in Waffo Dashboard. Stored encrypted at rest is recommended; never logged or displayed in plaintext after initial entry.',
             ],
+            'waffo_tax_category' => [
+                'title'       => 'Waffo Tax Category',
+                'type'        => 'text',
+                'description' => 'Tax category for pricing (e.g. "digital_goods", "saas"). See your Waffo Dashboard for valid values.',
+                'default'     => 'digital_goods',
+            ],
             'debug' => [
                 'title'   => 'Debug Log',
                 'type'    => 'checkbox',
@@ -87,6 +93,11 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
                 'orderMerchantExternalId' => (string) $order_id,
                 'buyerEmail'              => $order->get_billing_email(),
                 'successUrl'              => $this->get_return_url($order),
+                'priceSnapshot'           => [
+                    'amount'      => $this->build_price_snapshot_amount($order),
+                    'taxIncluded' => true,
+                    'taxCategory' => $this->get_option('waffo_tax_category', 'digital_goods'),
+                ],
             ]);
 
             $order->update_status('on-hold', 'Awaiting Waffo Pancake payment confirmation.');
@@ -155,6 +166,20 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
         }
 
         throw new \WaffoPancake\Api\Waffo_Api_Exception('No Waffo product mapping found for this order. Configure "_waffo_product_id" on the product (variable/variation products are not yet supported).');
+    }
+
+    /**
+     * 把WC订单的服务端计算总额（$order->get_total()）转换成priceSnapshot需要的
+     * 显示格式十进制字符串。金额必须来自订单总额，绝不能来自任何未经服务端验证的
+     * 客户端原始输入，这是防止价格篡改的关键约束（见Task 6.6计划文档）。
+     */
+    private function build_price_snapshot_amount(\WC_Order $order): string
+    {
+        $currency = $order->get_currency();
+        $divisor = \WaffoPancake\Money\Waffo_Money::minor_unit_divisor($currency);
+        $minor_amount = (int) round((float) $order->get_total() * $divisor);
+
+        return \WaffoPancake\Money\Waffo_Money::to_display_string($minor_amount, $currency);
     }
 
     public function process_refund($order_id, $amount = null, $reason = ''): bool|\WP_Error
