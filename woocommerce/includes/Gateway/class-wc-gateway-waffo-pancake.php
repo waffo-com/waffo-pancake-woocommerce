@@ -64,7 +64,7 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
             'waffo_tax_category' => [
                 'title'       => 'Waffo Tax Category',
                 'type'        => 'text',
-                'description' => 'Tax category for pricing (e.g. "digital_goods", "saas"). See your Waffo Dashboard for valid values.',
+                'description' => 'Tax category for pricing (e.g. "digital_goods", "saas"). See your Waffo Dashboard for valid values. Note: this gateway assumes your WooCommerce prices include tax (WooCommerce setting "Prices entered with tax" = Yes). If your store uses tax-exclusive pricing, contact support before enabling this gateway.',
                 'default'     => 'digital_goods',
             ],
             'debug' => [
@@ -172,19 +172,21 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
      * 把WC订单的服务端计算总额（$order->get_total()）转换成priceSnapshot需要的
      * 显示格式十进制字符串。金额必须来自订单总额，绝不能来自任何未经服务端验证的
      * 客户端原始输入，这是防止价格篡改的关键约束（见Task 6.6计划文档）。
+     *
+     * 转换逻辑本身在Waffo_Money::from_order_total()里实现并有纯PHPUnit测试覆盖
+     * （不依赖WC_Order），这里只负责取值传递。
      */
     private function build_price_snapshot_amount(\WC_Order $order): string
     {
-        $currency = $order->get_currency();
-        $divisor = \WaffoPancake\Money\Waffo_Money::minor_unit_divisor($currency);
-        $minor_amount = (int) round((float) $order->get_total() * $divisor);
-
-        return \WaffoPancake\Money\Waffo_Money::to_display_string($minor_amount, $currency);
+        return \WaffoPancake\Money\Waffo_Money::from_order_total($order->get_total(), $order->get_currency());
     }
 
     public function process_refund($order_id, $amount = null, $reason = ''): bool|\WP_Error
     {
         // TODO(Task 8+): 对接退款接口；具体交互模式依赖设计文档§10.4待确认的审核机制
+        // 重要提醒（供未来实现者）：退款金额必须基于这笔订单实际记录的priceSnapshot
+        // 覆盖后金额（即当初process_payment()发给Waffo的priceSnapshot.amount），
+        // 不能假设等于Waffo后台配置的商品原价——两者在本插件的设计下可能不同。
         return new \WP_Error('not_implemented', 'Refund handling pending confirmation of Waffo refund review process (see design doc §10.4)');
     }
 }
