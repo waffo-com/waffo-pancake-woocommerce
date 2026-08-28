@@ -183,10 +183,41 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
 
     public function process_refund($order_id, $amount = null, $reason = ''): bool|\WP_Error
     {
-        // TODO(Task 8+): 对接退款接口；具体交互模式依赖设计文档§10.4待确认的审核机制
-        // 重要提醒（供未来实现者）：退款金额必须基于这笔订单实际记录的priceSnapshot
-        // 覆盖后金额（即当初process_payment()发给Waffo的priceSnapshot.amount），
-        // 不能假设等于Waffo后台配置的商品原价——两者在本插件的设计下可能不同。
-        return new \WP_Error('not_implemented', 'Refund handling pending confirmation of Waffo refund review process (see design doc §10.4)');
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            return new \WP_Error('invalid_order', 'Order not found.');
+        }
+
+        $payment_id = $order->get_meta('_waffo_payment_id');
+        if (!$payment_id) {
+            return new \WP_Error('missing_payment_id', 'No Waffo payment ID recorded on this order; cannot request refund.');
+        }
+
+        // $amount为null表示WooCommerce调用方要求全额退款（标准process_refund()契约，
+        // 例如后台"Refund manually"未指定金额时）。退回订单总额，与process_payment()当初
+        // 发给Waffo的priceSnapshot.amount保持一致（两者都源自$order->get_total()，
+        // 见build_price_snapshot_amount()的同一约束）。
+        $refund_amount = $amount !== null ? (string) $amount : $order->get_total();
+
+        try {
+            $client = $this->build_api_client();
+
+            $display_amount = \WaffoPancake\Money\Waffo_Money::from_order_total($refund_amount, $order->get_currency());
+
+            $ticket = $client->create_refund_ticket($payment_id, $display_amount, $order->get_currency(), $reason ?: 'Refund requested via WooCommerce');
+
+            $order->add_order_note(sprintf(
+                'Waffo refund ticket %s submitted (status: %s). Refund will complete once Waffo reviews and approves the request — this is not instant.',
+                $ticket['ticketId'],
+                $ticket['status']
+            ));
+
+            return true;
+        } catch (\WaffoPancake\Api\Waffo_Api_Exception $e) {
+            // 与process_payment()不同，这里的WP_Error是给后台商户看的诊断信息（不是买家notice），
+            // 展示具体错误有助于商户排查；Waffo_Api_Exception的message只来自API业务错误或本地校验
+            // 失败描述，不会包含私钥/签名等敏感材料，可以安全展示。
+            return new \WP_Error('waffo_refund_failed', 'Refund request failed: ' . $e->getMessage());
+        }
     }
 }
