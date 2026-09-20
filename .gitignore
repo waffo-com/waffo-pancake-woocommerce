@@ -1,0 +1,4 @@
+.DS_Store
+*.pem
+!**/tests/fixtures/*.pem
+.env
