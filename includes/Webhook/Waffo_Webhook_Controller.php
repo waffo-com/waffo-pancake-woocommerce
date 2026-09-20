@@ -39,11 +39,18 @@ class Waffo_Webhook_Controller
         }
 
         $event = json_decode($raw_body, true);
-        if (!is_array($event) || !isset($event['eventId']) || !is_string($event['eventId'])) {
+        if (
+            !is_array($event)
+            || !isset($event['eventId'], $event['eventType'])
+            || !is_string($event['eventId'])
+            || !is_string($event['eventType'])
+        ) {
             return new \WP_REST_Response(['message' => 'Malformed webhook payload'], 400);
         }
 
-        if ($this->dedup->is_duplicate($event['eventId'])) {
+        $dedup_key = self::dedup_key($event['eventType'], $event['eventId']);
+
+        if ($this->dedup->is_duplicate($dedup_key)) {
             return new \WP_REST_Response(['message' => 'Duplicate event, already processed'], 200);
         }
 
@@ -54,8 +61,25 @@ class Waffo_Webhook_Controller
             return new \WP_REST_Response(['message' => 'Internal error processing webhook'], 500);
         }
 
-        $this->dedup->mark_processed($event['eventId']);
+        $this->dedup->mark_processed($dedup_key);
 
         return new \WP_REST_Response(['message' => 'ok'], 200);
+    }
+
+    /**
+     * 去重键必须是 eventType + eventId 的复合键。
+     *
+     * 官方文档 eventId Mapping：eventId 指向"触发事件的业务实体"，不同事件类型可以共用同一个
+     * eventId——例如 subscription.activated 与 subscription.canceled 的 eventId 都是订单ID ORD_x
+     * （生产实测确认）。只按 eventId 去重会把后到的 canceled 当作 activated 的重复投递静默丢弃。
+     * 重试投递不会更换 eventId/eventType，所以复合键仍能正确识别重试。
+     *
+     * 键长上限：transient key 受 option_name 191 字符限制，前缀 waffo_evt_（10）+ 最长事件类型
+     * subscription.plan_change_scheduled（34）+ 冒号 + 最长 eventId（ORD_22位 + "-" + ISO时间戳 24位 ≈ 47）
+     * 合计 < 100，安全。
+     */
+    public static function dedup_key(string $event_type, string $event_id): string
+    {
+        return $event_type . ':' . $event_id;
     }
 }
