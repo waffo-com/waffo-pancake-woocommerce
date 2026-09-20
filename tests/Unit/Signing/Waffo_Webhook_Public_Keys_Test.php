@@ -29,25 +29,21 @@ class Waffo_Webhook_Public_Keys_Test extends TestCase
         $test_key = openssl_pkey_get_public(Waffo_Webhook_Public_Keys::for_mode('test'));
         $live_key = openssl_pkey_get_public(Waffo_Webhook_Public_Keys::for_mode('prod'));
 
-        if ($test_key === false || $live_key === false) {
-            $this->markTestIncomplete(
-                'Waffo webhook公钥仍是占位符，需要从Waffo Dashboard（或 ~/Projects/Waffo-pancake-dashboard/src/lib/api/webhook-keys.ts）拷贝真实PEM值替换 includes/Signing/Waffo_Webhook_Public_Keys.php 后，此测试才能通过。'
-            );
-        }
-
         $this->assertNotFalse($test_key);
         $this->assertNotFalse($live_key);
+
+        // 两把都应是2048位RSA公钥；test/live必须不同，防止复制粘贴时贴成同一把
+        $this->assertSame(2048, openssl_pkey_get_details($test_key)['bits']);
+        $this->assertSame(2048, openssl_pkey_get_details($live_key)['bits']);
+        $this->assertNotSame(
+            Waffo_Webhook_Public_Keys::for_mode('test'),
+            Waffo_Webhook_Public_Keys::for_mode('prod')
+        );
     }
 
-    /**
-     * 当前占位符尚未替换为真实密钥，所以断言为false是预期状态。
-     * 一旦真实PEM密钥填入 Waffo_Webhook_Public_Keys 后，这里必须同步改成
-     * assertTrue，否则这条测试会在密钥填入后"意外失败"，且没人知道原因——
-     * 届时请把下面两个assertFalse改为assertTrue。
-     */
-    public function test_is_configured_returns_false_for_placeholder_keys(): void
+    public function test_is_configured_returns_true_for_both_modes(): void
     {
-        $this->assertFalse(Waffo_Webhook_Public_Keys::is_configured('test'));
-        $this->assertFalse(Waffo_Webhook_Public_Keys::is_configured('prod'));
+        $this->assertTrue(Waffo_Webhook_Public_Keys::is_configured('test'));
+        $this->assertTrue(Waffo_Webhook_Public_Keys::is_configured('prod'));
     }
 }
