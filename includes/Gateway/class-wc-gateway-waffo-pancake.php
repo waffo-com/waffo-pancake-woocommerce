@@ -10,8 +10,6 @@ if (!defined('ABSPATH')) {
 
 class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
 {
-    public const API_BASE_URL = 'https://api.waffo.ai';
-
     public function __construct()
     {
         $this->id                 = 'waffo_pancake';
@@ -29,7 +27,8 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, [$this, 'process_admin_options']);
 
-        // TODO(Task 8+): 注册webhook REST端点、Cron兜底任务
+        // webhook REST端点与Cron兜底任务不在网关实例里注册（网关只在结账/设置页被实例化），
+        // 统一在插件入口 waffo-pancake-woocommerce.php 的 plugins_loaded 里接线。
     }
 
     public function init_form_fields(): void
@@ -63,6 +62,11 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
                 'title'       => 'Private Key (PEM)',
                 'type'        => 'password',
                 'description' => 'RSA private key generated in Waffo Dashboard. Stored encrypted at rest is recommended; never logged or displayed in plaintext after initial entry.',
+            ],
+            'store_id' => [
+                'title'       => 'Store ID',
+                'type'        => 'text',
+                'description' => 'Your Waffo Store ID (STO_xxx), shown in Waffo Dashboard → store settings. Required for the background reconciliation job that recovers orders when a webhook is missed.',
             ],
             'waffo_tax_category' => [
                 'title'       => 'Waffo Tax Category',
@@ -150,9 +154,8 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
         // 服务端按验签成功的那把Key决定环境，不需要也不存在独立的test域名
         // （见官方文档 api-reference/authentication：API Key认证不需要X-Environment头）。
         // 后台的Environment选项只用于选择webhook验签公钥（见Waffo_Webhook_Public_Keys）。
-        $signer = new \WaffoPancake\Signing\Waffo_Signer($this->get_option('private_key', ''));
-
-        return new \WaffoPancake\Api\Waffo_Api_Client($signer, $this->get_option('merchant_id', ''), self::API_BASE_URL);
+        // 构造逻辑收敛在Waffo_Settings，webhook控制器与Cron调度器复用同一份。
+        return \WaffoPancake\Waffo_Settings::make_api_client();
     }
 
     private function resolve_waffo_product_id(\WC_Order $order): string
