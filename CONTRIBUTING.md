@@ -1,43 +1,40 @@
 # Contributing
 
-## Layout
-
-One directory per platform. A plugin directory is self-contained: its own
-dependency manifest, tests, docs and license. Nothing is shared across
-directories except this README and the issue tracker.
-
-```
-woocommerce/   PHP 8.1+, WooCommerce payment gateway (WC_Payment_Gateway)
-```
-
-## WooCommerce plugin
+## Setup
 
 ```bash
-cd woocommerce
 composer install
 vendor/bin/phpunit
 ```
 
-Design notes and the implementation plan live in `woocommerce/docs/plans/`.
+Tests are plain PHPUnit; the WordPress / WooCommerce runtime is stubbed in
+`tests/bootstrap.php`. Every behaviour change comes with a test.
+
+## Layout
+
+```
+waffo-pancake-woocommerce.php   plugin entry, registers the gateway
+includes/Gateway/               WC_Payment_Gateway subclass
+includes/Signing/               request signer, webhook verifier, platform public keys
+includes/Dedup/                 eventId de-duplication (transient-backed)
+includes/Money/                 minor-unit conversion
+includes/Order/                 webhook event → order status mapping
+docs/plans/                     design doc + implementation plans
+```
+
 The webhook public keys in `includes/Signing/Waffo_Webhook_Public_Keys.php`
-are placeholders until the platform keys are published; signature
-verification fails closed until they are filled in.
+(on `feature/real-api-integration`) are placeholders until the platform keys
+are published; verification fails closed until they are filled in.
 
-Branches:
+## Branches
 
-- `main` — reviewed scaffold (signing, money, webhook dedup, status mapping)
+- `main` — reviewed scaffold
 - `feature/real-api-integration` — checkout session / refund / webhook
-  controller wired to the real Pancake API, under review
-
-## Proposing a new platform
-
-Open an issue first describing the platform's payment-extension model
-(redirect vs. embedded, how webhooks reach the store, subscription support).
-The WooCommerce design doc is a good template for what to cover.
+  controller against the real Pancake API, under review
 
 ## Rules
 
 - Never commit merchant keys, `.pem` files or real `MER_` / `STO_` IDs.
-  Test fixtures use throwaway keys generated for the test suite only.
+  `tests/fixtures/*.pem` are throwaway keys generated for the test suite.
 - Conventional commit messages (`feat:`, `fix:`, `docs:`, `test:`).
-- Every behaviour change comes with a test.
+- Say how you verified the change in the PR.
