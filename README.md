@@ -14,8 +14,31 @@ polling fallback.
 - One-time and subscription products (`onetime-order` / `subscription-order`);
   subscriptions need the official WooCommerce Subscriptions plugin
 - `WC_Payment_Gateway` integration: settings page, checkout option, refunds
-- RSA-SHA256 request signing, webhook signature verification, `eventId` dedup
+- RSA-SHA256 request signing, webhook signature verification, `eventType`+`eventId` dedup
 - Webhook → order status mapping with a WP-Cron reconciler as fallback
+  (every 15 minutes, looks up unpaid orders by `orderMerchantExternalId`)
+
+## Configuration
+
+WooCommerce → Settings → Payments → Waffo Pancake:
+
+| Setting | Where to find it |
+|---------|------------------|
+| Environment | Must match the environment your API key was created in. Selects the webhook verification key; API requests always go to `https://api.waffo.ai`. |
+| Merchant ID / Private Key | Waffo Dashboard → API & Development. Create the key in Test or Production. |
+| Store ID | Waffo Dashboard → store settings (`STO_xxx`). Required by the reconciliation job. |
+| Waffo Tax Category | Tax category sent in `priceSnapshot`; prices are assumed tax-inclusive. |
+
+Then register the webhook in Waffo Dashboard → Settings → Webhooks, channel
+`http`, URL:
+
+```
+https://your-store.example/wp-json/waffo-pancake/v1/webhook
+```
+
+Subscribe at least to `order.completed`, `refund.succeeded` and `refund.failed`.
+Each WooCommerce product that uses this gateway needs its Waffo Product ID set
+in the product edit screen.
 
 ## Requirements
 

@@ -968,23 +968,30 @@ git commit -m "feat: 添加插件入口与WC_Payment_Gateway骨架"
 
 ---
 
-### Task 8: 真实环境联调（阻塞中，依赖待确认信息）
+### Task 8: 真实环境联调 — 清偿状态（2026-09-20 更新）
 
-**不在本次骨架实现范围内执行**，仅记录清楚后续步骤，等设计文档第 10 节的待确认事项拿到答案后再排期：
+原清单在 `2026-08-27-real-api-integration.md` 执行后逐条核对，状态如下：
 
-1. 确认商户模式 `create-checkout-session` / `issue-session-token` 完整字段和认证头 → 完成 `Waffo_Api_Client::create_checkout_session()`
-2. 确认 webhook 平台公钥获取方式 → 把 `Waffo_Webhook_Verifier` 接入真实的 webhook REST 端点（`includes/Webhook/Waffo_Webhook_Controller.php`，注册 `register_rest_route`）
-3. 确认退款审核机制的真实行为 → 定稿 `process_refund()` 的用户提示文案和状态流转
-4. 用 test 环境密钥对，走通设计文档第 9 节的完整测试计划
-5. Webhook端点实现时需区分 `openssl_verify` 返回 `-1`（内部错误，如公钥损坏）与 `0`（验证失败/真实伪造）并分别记录日志，避免运维无法区分攻击与配置错误
-6. 确认防重放时间窗口的最终时长（当前5分钟为占位值），并评估是否需要区分"时间戳过老"与"时间戳来自未来"两种拒绝原因分别记日志，便于排查NTP时钟漂移类故障
-7. Waffo_Money接入真实订单流程前，需决策：是否对负数金额/非法货币码做输入校验并抛异常；是否需要为PHP_INT_MAX边界值和零小数货币分支补充防御性格式化
-8. WP_Transient_Event_Store接入真实webhook前，需确认Waffo webhook payload中eventId的实际格式与最大长度，评估是否超出WordPress transient key的191字符上限（当前"waffo_evt_"前缀+event_id直接拼接，未做长度保护/哈希），避免长event_id导致dedup key写入失败或截断冲突
+1. ✅ **已清偿** 商户认证方式：API Key（`X-Merchant-Id`/`X-Timestamp`/`X-Signature`，RSA-SHA256），test/prod 共用 `https://api.waffo.ai`，环境由 Key 绑定 → `Waffo_Api_Client` / `Waffo_Settings::make_api_client()`
+2. ✅ **已清偿** webhook 公钥：平台固定值（test/live 各一把），已从 Dashboard 源码拷入 `Waffo_Webhook_Public_Keys`，REST 端点 `POST /wp-json/waffo-pancake/v1/webhook` 已在入口注册
+3. ⏳ **仍待办** 退款审核机制：`process_refund()` 提交 refund ticket 后立即返回 true（WC 侧会即时生成退款记录），而 Waffo 侧要审核后才真正退款；`refund.failed` 目前只写订单备注。需要业务方确认是否要改成"工单通过后再生成 WC 退款"
+4. ⏳ **仍待办** 完整测试计划：需要真实 WooCommerce 测试站点跑设计文档第 9 节；`Waffo_Reconcile_Scheduler`、入口接线、网关类均只做了 `php -l`
+5. ⏳ **仍待办** `openssl_verify` 返回 -1 与 0 的区分日志
+6. ⏳ **仍待办** 防重放窗口时长定稿（当前 5 分钟）
+7. ⏳ **仍待办** `Waffo_Money` 负数/非法货币码输入校验
+8. ✅ **已清偿** transient key 长度：eventId 最长约 47 字符（`ORD_x-<ISO时间戳>`），复合键 `eventType:eventId` 加前缀后 < 100，见 `Waffo_Webhook_Controller::dedup_key()` 注释
+9. ✅ **已清偿（有保留）** 私钥字段已改 `password` 类型并移除公钥输入框；`password` 类型的值仍会渲染进 HTML `value` 属性，只是从"随手可见"降为"需查看源码"，未做留空保留原值模式
+10. ✅ **已清偿** `process_payment()` 走 `wc_add_notice` + `['result' => 'fail']`，上游错误只进日志不给买家
 
-**准入条件（Task 8 必须先完成以下两项，才能开始接入真实商户密钥/真实结账流程；未完成前不得放行商户输入真实私钥或触发真实checkout）：**
+**本轮新增的跟进项：**
 
-9. `private_key`/`waffo_public_key` 两个设置字段当前用WooCommerce的`textarea`类型，会在每次打开支付设置页时把完整PEM私钥明文渲染进页面HTML源码（可被View Source、浏览器插件、表单恢复缓存等途径读取）。Task 8接入真实商户密钥前，必须先把这两个字段改为`type => 'password'`（或自定义的掩码渲染+留空保留原值模式），不能在此项完成前允许商户输入真实私钥。
-10. `process_payment()`当前用裸露的`throw new \Exception(...)`占位，WooCommerce结账流程对未捕获的通用Exception处理方式因版本和是否用Store API而异，可能导致糟糕的用户体验甚至在`WP_DEBUG`开启时泄露堆栈信息。Task 8接入真实`create-checkout-session`调用时，必须把这里改为`wc_add_notice($message, 'error'); return ['result' => 'fail'];`的WooCommerce标准错误处理模式，作为该任务的第一步修改，不能等到最后再处理。
+11. ✅ 商品映射方案定案：商品自定义字段 `_waffo_product_id`（Task 6.5 已实现编辑页 UI）
+12. ⏳ `resolve_waffo_product_id()` 未配置时要到结账才报错，正式上线前应在设置页加"检测未配置 Waffo 商品"的诊断或强制校验
+13. ⏳ webhook 端点 `permission_callback` 为 `__return_true`（认证靠签名），需在真实环境确认不会被安全插件/WAF 误拦
+14. ⏳ **Store ID 设置项**：对账反查 `onetimeOrders` 必须带 `storeId`，商户漏填时 Cron 只记 warning 日志、不对账；设置页应加必填校验或自动从 `stores` 查询补全
+15. ⏳ **订阅事件未接入 WC Subscriptions**：`Order_Status_Mapper` 里的订阅状态映射当前未被使用，`subscription.*` 事件只写订单备注
+16. ⏳ `Waffo_Reconcile_Scheduler::find_orders_awaiting_payment()` 的 `meta_query` 在 HPOS 与传统 posts 存储下的行为需在真实站点验证
+17. ⏳ 已取消的 Waffo 订单同步为 WC `cancelled` 后，若买家在 Waffo 侧重新支付同一 session（pending 可重试），webhook `order.completed` 会因 WC 订单不在等待付款状态而只补 payment id、不改状态——需确认 session 过期后 Waffo 是否真的不允许再付款
 
 ---
 

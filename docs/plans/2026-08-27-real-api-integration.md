@@ -1343,3 +1343,18 @@ Expected: 除`Waffo_Webhook_Public_Keys_Test::test_keys_are_valid_pem_public_key
 - WP-Cron定时任务的实际注册（`wp_schedule_event`）与"筛选哪些订单需要轮询"的`WC_Order_Query`逻辑
 - 订阅（`WC Subscriptions`）相关的真实接入（骨架设计文档提到需要支持，但本计划聚焦一次性支付先跑通）
 - 退款审核机制的最终确认与商户端UI文案定稿
+
+
+---
+
+## 执行记录与偏差（2026-09-20）
+
+Task 8–10 执行完毕，以下几处与计划原稿不同，以代码为准：
+
+- **API 域名**：计划与骨架里 test 模式请求 `https://api.test.waffo.ai`，该主机不存在。官方文档明确 API Key 认证 test/prod 共用 `https://api.waffo.ai`，环境由 Key 绑定。已改为常量 `Waffo_Settings::API_BASE_URL`，Environment 选项只影响 webhook 验签公钥。
+- **对账查询入口**：计划用 `onetimeOrder(id)`，但 create-session 只返回 `sessionId/checkoutUrl/expiresAt`，插件拿不到 Waffo 订单 ID。改为 `find_onetime_order_by_external_id(storeId, ref)`，走 `onetimeOrders` + `orderMerchantExternalId` 过滤，并带回 `payments{id status}`。因此网关新增 **Store ID** 设置项。
+- **一次性订单终态**：计划写 `completed/failed`，官方生命周期实际是 `pending/completed/canceled`，无 `failed`。`canceled` 会把等待付款的 WC 订单同步为 `cancelled`。
+- **去重键**：改为 `eventType:eventId` 复合键。官方 eventId Mapping 与生产实测：`subscription.activated` 与 `subscription.canceled` 共用 eventId（订单 ID）。
+- **`_waffo_payment_id` 写入**：`process_refund()` 依赖此 meta，但计划里没有任何地方写入。现在 webhook `order.completed` 与 Cron 对账都通过 `Waffo_Order_Sync::mark_paid()` 写入，并用 WC 标准的 `payment_complete(PAY_id)` 推进状态（而非 `update_status('processing')`），幂等。
+- **Task 8 范围扩展**：计划把 `wp_schedule_event` 与订单筛选列为范围外，本轮一并实现为 `Waffo_Reconcile_Scheduler`（每 15 分钟、下单 10 分钟后至 3 天内、每轮 ≤50 单、随插件启停注册/注销），仅 `php -l` 验证。
+- **公钥占位符**：已填入真实 PEM，`Waffo_Webhook_Public_Keys_Test` 断言翻转为"两把均可解析、2048 位、互不相同"。
