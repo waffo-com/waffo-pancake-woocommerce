@@ -229,10 +229,12 @@ class Waffo_Api_Client_Test extends TestCase
         $this->assertSame('pending', $result['status']);
     }
 
-    public function test_query_order_status_uses_parameterized_graphql_variables(): void
+    public function test_find_onetime_order_by_external_id_queries_by_store_and_ref(): void
     {
         \WP_Mock::userFunction('wp_json_encode')
             ->andReturnUsing(fn ($value) => json_encode($value));
+
+        $body = '{"data":{"onetimeOrders":[{"id":"ORD_1","status":"completed","orderMerchantExternalId":"42","payments":[{"id":"PAY_failed","status":"failed"},{"id":"PAY_ok","status":"succeeded"}]}]}}';
 
         \WP_Mock::userFunction('wp_remote_post')
             ->once()
@@ -240,22 +242,57 @@ class Waffo_Api_Client_Test extends TestCase
                 'https://api.test.waffo.ai/v1/graphql',
                 \Mockery::on(function ($args) {
                     $decoded = json_decode($args['body'], true);
-                    return strpos($decoded['query'], '$id') !== false
+                    // 变量化传参：query文本里不得内联任何用户可控值，storeId/ref都走variables
+                    return strpos($decoded['query'], '$storeId') !== false
+                        && strpos($decoded['query'], '$ref') !== false
                         && strpos($decoded['query'], '"') === false
-                        && $decoded['variables']['id'] === 'ORDER_"}_injected';
+                        && $decoded['variables'] === ['storeId' => 'STO_1', 'ref' => '42"}_injected'];
                 })
             )
-            ->andReturn(['response' => ['code' => 200], 'body' => '{"data":{"onetimeOrder":{"id":"ORDER_\"}_injected","status":"paid"}}}']);
+            ->andReturn(['response' => ['code' => 200], 'body' => $body]);
 
         \WP_Mock::userFunction('is_wp_error')->andReturn(false);
         \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
-        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn('{"data":{"onetimeOrder":{"id":"ORDER_\"}_injected","status":"paid"}}}');
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn($body);
 
         $client = $this->make_client();
 
-        $result = $client->query_order_status('ORDER_"}_injected');
+        $result = $client->find_onetime_order_by_external_id('STO_1', '42"}_injected');
 
-        $this->assertSame('paid', $result['status']);
+        $this->assertSame('ORD_1', $result['id']);
+        $this->assertSame('completed', $result['status']);
+        $this->assertSame('PAY_ok', $result['payments'][1]['id']);
+    }
+
+    public function test_find_onetime_order_by_external_id_returns_null_when_not_found(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        $body = '{"data":{"onetimeOrders":[]}}';
+        \WP_Mock::userFunction('wp_remote_post')->once()->andReturn(['response' => ['code' => 200], 'body' => $body]);
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn($body);
+
+        $this->assertNull($this->make_client()->find_onetime_order_by_external_id('STO_1', '404'));
+    }
+
+    public function test_find_onetime_order_by_external_id_throws_on_graphql_errors_with_200(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        // GraphQL 语义错误通常伴随 HTTP 200，必须单独识别 errors 数组，否则会被当成"未找到"静默吞掉
+        $body = '{"errors":[{"message":"Expected format: STO_xxx, got \"bad\""}],"data":null}';
+        \WP_Mock::userFunction('wp_remote_post')->once()->andReturn(['response' => ['code' => 200], 'body' => $body]);
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn($body);
+
+        $this->expectException(Waffo_Api_Exception::class);
+        $this->expectExceptionMessage('Expected format');
+        $this->make_client()->find_onetime_order_by_external_id('bad', '1');
     }
 
     public function test_issue_session_token_forwards_payload_and_returns_data(): void

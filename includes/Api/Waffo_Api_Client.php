@@ -77,17 +77,36 @@ class Waffo_Api_Client
     }
 
     /**
-     * 查询订单状态，供WP-Cron兜底轮询任务调用。使用GraphQL variables参数化传参，
-     * 避免订单ID中出现的特殊字符（如双引号、花括号）破坏query语法或引入注入风险。
+     * 按商户侧订单号（我们传给create-session的orderMerchantExternalId，即WC订单ID）反查
+     * Waffo一次性订单，供WP-Cron兜底轮询调用。
+     *
+     * 为什么不用 onetimeOrder(id)：create-session 只返回 sessionId/checkoutUrl/expiresAt，
+     * 插件在下单时拿不到 Waffo 订单ID（ORD_xxx），只能凭 orderMerchantExternalId 反查；
+     * 而 onetimeOrders 列表查询要求 storeId，所以网关设置里需要商户填写 Store ID。
+     *
+     * 使用GraphQL variables参数化传参，避免订单号里的特殊字符破坏query语法或引入注入风险。
+     * 返回 null 表示未找到；GraphQL层错误（即使HTTP 200）抛 Waffo_Api_Exception。
+     *
+     * @return array{id:string,status:string,orderMerchantExternalId?:string,payments:array<int,array{id:string,status:string}>}|null
      */
-    public function query_order_status(string $order_id): array
+    public function find_onetime_order_by_external_id(string $store_id, string $external_id): ?array
     {
-        $query = 'query GetOrderStatus($id: ID!) { onetimeOrder(id: $id) { id status } }';
+        $query = 'query FindOrderByRef($storeId: String!, $ref: String!) {'
+            . ' onetimeOrders(storeId: $storeId, limit: 1, filter: { orderMerchantExternalId: { eq: $ref } }) {'
+            . ' id status orderMerchantExternalId payments { id status } } }';
+
         $response = $this->post('/v1/graphql', [
-            'query' => $query,
-            'variables' => ['id' => $order_id],
+            'query'     => $query,
+            'variables' => ['storeId' => $store_id, 'ref' => $external_id],
         ]);
-        return $response['data']['onetimeOrder'] ?? [];
+
+        if (!empty($response['errors'])) {
+            $message = $response['errors'][0]['message'] ?? 'GraphQL query failed';
+            throw new Waffo_Api_Exception($message, 200);
+        }
+
+        $orders = $response['data']['onetimeOrders'] ?? [];
+        return $orders[0] ?? null;
     }
 
     private function signed_headers(string $method, string $path, string $body): array
