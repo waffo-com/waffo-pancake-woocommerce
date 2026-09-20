@@ -10,6 +10,8 @@ if (!defined('ABSPATH')) {
 
 class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
 {
+    public const API_BASE_URL = 'https://api.waffo.ai';
+
     public function __construct()
     {
         $this->id                 = 'waffo_pancake';
@@ -46,10 +48,11 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
                 'default'     => 'Waffo Pancake',
             ],
             'environment' => [
-                'title'   => 'Environment',
-                'type'    => 'select',
-                'options' => ['test' => 'Test', 'prod' => 'Production'],
-                'default' => 'test',
+                'title'       => 'Environment',
+                'type'        => 'select',
+                'options'     => ['test' => 'Test', 'prod' => 'Production'],
+                'default'     => 'test',
+                'description' => 'Must match the environment your API key was created in (Waffo Dashboard → API & Development). This selects the webhook verification key; API requests always go to the same endpoint and the key itself determines test vs. production.',
             ],
             'merchant_id' => [
                 'title'       => 'Merchant ID',
@@ -143,12 +146,13 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
 
     private function build_api_client(): \WaffoPancake\Api\Waffo_Api_Client
     {
-        $environment = $this->get_option('environment', 'test');
-        $base_url = $environment === 'prod' ? 'https://api.waffo.ai' : 'https://api.test.waffo.ai';
-
+        // test/prod共用同一个API域名：API Key在Dashboard创建时就绑定了环境，
+        // 服务端按验签成功的那把Key决定环境，不需要也不存在独立的test域名
+        // （见官方文档 api-reference/authentication：API Key认证不需要X-Environment头）。
+        // 后台的Environment选项只用于选择webhook验签公钥（见Waffo_Webhook_Public_Keys）。
         $signer = new \WaffoPancake\Signing\Waffo_Signer($this->get_option('private_key', ''));
 
-        return new \WaffoPancake\Api\Waffo_Api_Client($signer, $this->get_option('merchant_id', ''), $base_url);
+        return new \WaffoPancake\Api\Waffo_Api_Client($signer, $this->get_option('merchant_id', ''), self::API_BASE_URL);
     }
 
     private function resolve_waffo_product_id(\WC_Order $order): string
