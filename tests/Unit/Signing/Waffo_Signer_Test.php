@@ -45,6 +45,31 @@ class Waffo_Signer_Test extends TestCase
         $this->assertSame($signature_without_query, $signature_with_query);
     }
 
+    public function test_sign_accepts_base64_private_key_from_dashboard(): void
+    {
+        openssl_pkey_export(openssl_pkey_get_private($this->private_key), $pkcs8);
+        $body = preg_replace('/-----[^\r\n]+-----|\s+/', '', $pkcs8);
+        $signature = (new Waffo_Signer($body))->sign('POST', '/checkout', 1700000000000, '{}');
+        $canonical = "POST\n/checkout\n1700000000000\n" . base64_encode(hash('sha256', '{}', true));
+
+        $this->assertSame(1, openssl_verify($canonical, base64_decode($signature), $this->public_key, OPENSSL_ALGO_SHA256));
+    }
+
+    public function test_sign_accepts_pem_without_linebreaks_from_password_input(): void
+    {
+        $single_line = str_replace(["\r", "\n"], '', $this->private_key);
+        $signature = (new Waffo_Signer($single_line))->sign('POST', '/checkout', 1700000000000, '{}');
+        $canonical = "POST\n/checkout\n1700000000000\n" . base64_encode(hash('sha256', '{}', true));
+
+        $this->assertSame(1, openssl_verify($canonical, base64_decode($signature), $this->public_key, OPENSSL_ALGO_SHA256));
+    }
+
+    public function test_sign_rejects_invalid_base64_private_key(): void
+    {
+        $this->expectException(Waffo_Api_Exception::class);
+        (new Waffo_Signer(base64_encode('not a private key')))->sign('POST', '/checkout', 1700000000000, '{}');
+    }
+
     public function test_sign_empty_body_hashes_empty_string(): void
     {
         $signer = new Waffo_Signer($this->private_key);
