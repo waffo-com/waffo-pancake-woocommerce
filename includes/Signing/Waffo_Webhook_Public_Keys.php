@@ -40,7 +40,7 @@ PEM;
         return match ($mode) {
             'test' => self::TEST_KEY,
             'prod' => self::PROD_KEY,
-            default => throw new \InvalidArgumentException('Unknown Waffo environment mode: ' . $mode),
+            default => throw new \InvalidArgumentException('Unknown Waffo environment mode: ' . esc_html($mode)),
         };
     }
 

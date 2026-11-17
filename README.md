@@ -5,7 +5,7 @@ Merchant of Record for software and digital products. Buyers are redirected to
 the Waffo hosted checkout; order state is driven by signed webhooks, with a
 polling fallback.
 
-> 🧪 **Status: beta (v0.1.0).** Not yet on WordPress.org — install the zip
+> 🧪 **Status: beta.** Not yet on WordPress.org — install the zip
 > from [GitHub Releases](https://github.com/waffo-com/waffo-pancake-woocommerce/releases).
 
 ## Installation
@@ -19,14 +19,17 @@ polling fallback.
 ## Supported in this version
 
 - ✅ One-time payments for simple products (buyer pays once via Waffo hosted checkout)
+- ✅ Both the block-based Checkout (WooCommerce default since 8.3) and the classic shortcode checkout
+- ✅ HPOS (High-Performance Order Storage)
 - ✅ Refunds initiated from the WooCommerce order screen
 - ❌ Subscriptions / recurring billing (planned; subscription webhooks are only logged as order notes)
 - ❌ Variable products (one WooCommerce product maps to one Waffo Product ID)
 
 > ⚠️ **Refunds:** clicking Refund in WooCommerce submits a refund request to
-> Waffo, which is reviewed asynchronously. WooCommerce records the refund
-> immediately, even if Waffo later rejects it. Check the final refund status in
-> the Waffo Dashboard (`refund.succeeded` / `refund.failed` are added as order notes).
+> Waffo, which is processed asynchronously. WooCommerce records the refund
+> immediately; if Waffo later sends `refund.failed`, the plugin removes that
+> refund record and restores the order status (since 0.1.1). Check the final
+> refund status in the Waffo Dashboard.
 
 ## What it does
 
@@ -60,6 +63,19 @@ in the product edit screen.
 ## Requirements
 
 PHP 8.1+, WordPress with WooCommerce. Composer for development.
+
+## Release
+
+`readme.txt` is the WordPress.org listing. To build an installable zip:
+
+```bash
+git archive HEAD | tar -x -C build/waffo-pancake-woocommerce
+cd build/waffo-pancake-woocommerce && composer install --no-dev --optimize-autoloader
+rm -rf tests docs phpunit.xml.dist CONTRIBUTING.md .gitignore
+cd .. && zip -r waffo-pancake-woocommerce-<version>.zip waffo-pancake-woocommerce
+```
+
+Bump the version in three places: plugin header `Version`, `WAFFO_PANCAKE_WC_VERSION`, and `Stable tag` in `readme.txt`.
 
 ## Development
 
