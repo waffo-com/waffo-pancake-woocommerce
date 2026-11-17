@@ -65,13 +65,22 @@ class Waffo_Api_Client
      * @param string $amount 必须用 Waffo_Money::to_display_string() 生成，不要手工拼接，
      *                        尤其零小数货币（如JPY）没有小数位，手工拼接容易出错。
      */
-    public function create_refund_ticket(string $payment_id, string $amount, string $currency, string $reason): array
+    /**
+     * @param string|null $merchant_ref 商户侧退款标识（refundTicketMerchantExternalId，≤128字符），
+     *                                  Waffo会在 refund.* webhook 里原样带回，用于定位对应的WC退款记录
+     */
+    public function create_refund_ticket(string $payment_id, string $amount, string $currency, string $reason, ?string $merchant_ref = null): array
     {
-        $response = $this->post('/v1/actions/refund-ticket/create-ticket', [
+        $payload = [
             'paymentId' => $payment_id,
             'requestedAmount' => ['amount' => $amount, 'currency' => $currency],
             'reason' => $reason,
-        ]);
+        ];
+        if ($merchant_ref !== null && $merchant_ref !== '') {
+            $payload['refundTicketMerchantExternalId'] = $merchant_ref;
+        }
+
+        $response = $this->post('/v1/actions/refund-ticket/create-ticket', $payload);
 
         return $response['data'];
     }
@@ -102,7 +111,7 @@ class Waffo_Api_Client
 
         if (!empty($response['errors'])) {
             $message = $response['errors'][0]['message'] ?? 'GraphQL query failed';
-            throw new Waffo_Api_Exception($message, 200);
+            throw new Waffo_Api_Exception(esc_html($message), 200);
         }
 
         $orders = $response['data']['onetimeOrders'] ?? [];
@@ -128,7 +137,7 @@ class Waffo_Api_Client
         $response = $method === 'GET' ? wp_remote_get($url, $args) : wp_remote_post($url, $args);
 
         if (is_wp_error($response)) {
-            throw new Waffo_Api_Exception($response->get_error_message());
+            throw new Waffo_Api_Exception(esc_html($response->get_error_message()));
         }
 
         $status_code = wp_remote_retrieve_response_code($response);
@@ -136,7 +145,7 @@ class Waffo_Api_Client
         $decoded = json_decode($raw_body, true);
 
         if (!is_array($decoded)) {
-            throw new Waffo_Api_Exception('Malformed JSON response from Waffo API', $status_code);
+            throw new Waffo_Api_Exception('Malformed JSON response from Waffo API', (int) $status_code);
         }
 
         if ($status_code >= 400) {
@@ -145,7 +154,7 @@ class Waffo_Api_Client
             $error_code = $first_error['code'] ?? null;
 
             // 调用方捕获此异常时，记录日志请脱敏请求/响应体中的支付凭证等敏感字段，避免泄漏到日志系统。
-            throw new Waffo_Api_Exception($message, $status_code, $error_code);
+            throw new Waffo_Api_Exception(esc_html($message), (int) $status_code, $error_code === null ? null : esc_html((string) $error_code));
         }
 
         return $decoded;

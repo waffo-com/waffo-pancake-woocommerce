@@ -212,7 +212,8 @@ class Waffo_Api_Client_Test extends TestCase
                 'https://api.test.waffo.ai/v1/actions/refund-ticket/create-ticket',
                 \Mockery::on(function ($args) {
                     $decoded = json_decode($args['body'], true);
-                    return $decoded['paymentId'] === 'PAY_1' && $decoded['requestedAmount']['amount'] === '10.00';
+                    return $decoded['paymentId'] === 'PAY_1' && $decoded['requestedAmount']['amount'] === '10.00'
+                        && !array_key_exists('refundTicketMerchantExternalId', $decoded);
                 })
             )
             ->andReturn(['response' => ['code' => 200], 'body' => '{"data":{"ticketId":"RFT_1","status":"pending"}}']);
@@ -227,6 +228,31 @@ class Waffo_Api_Client_Test extends TestCase
 
         $this->assertSame('RFT_1', $result['ticketId']);
         $this->assertSame('pending', $result['status']);
+    }
+
+    public function test_create_refund_ticket_sends_merchant_ref_when_given(): void
+    {
+        \WP_Mock::userFunction('wp_json_encode')
+            ->andReturnUsing(fn ($value) => json_encode($value));
+
+        \WP_Mock::userFunction('wp_remote_post')
+            ->once()
+            ->with(
+                'https://api.test.waffo.ai/v1/actions/refund-ticket/create-ticket',
+                \Mockery::on(function ($args) {
+                    $decoded = json_decode($args['body'], true);
+                    return $decoded['refundTicketMerchantExternalId'] === 'wc_42_abc';
+                })
+            )
+            ->andReturn(['response' => ['code' => 200], 'body' => '{"data":{"ticketId":"RFT_1","status":"pending"}}']);
+
+        \WP_Mock::userFunction('is_wp_error')->andReturn(false);
+        \WP_Mock::userFunction('wp_remote_retrieve_response_code')->andReturn(200);
+        \WP_Mock::userFunction('wp_remote_retrieve_body')->andReturn('{"data":{"ticketId":"RFT_1","status":"pending"}}');
+
+        $result = $this->make_client()->create_refund_ticket('PAY_1', '10.00', 'USD', 'reason', 'wc_42_abc');
+
+        $this->assertSame('RFT_1', $result['ticketId']);
     }
 
     public function test_find_onetime_order_by_external_id_queries_by_store_and_ref(): void

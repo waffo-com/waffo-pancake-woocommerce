@@ -42,7 +42,7 @@ class Waffo_Signer
         }
 
         if (openssl_sign($canonical, $signature, $private_key, OPENSSL_ALGO_SHA256) === false) {
-            throw new Waffo_Api_Exception('Failed to sign request: ' . openssl_error_string());
+            throw new Waffo_Api_Exception('Failed to sign request: ' . esc_html((string) openssl_error_string()));
         }
 
         return base64_encode($signature);

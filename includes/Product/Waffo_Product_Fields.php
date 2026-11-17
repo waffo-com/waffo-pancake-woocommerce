@@ -28,7 +28,9 @@ class Waffo_Product_Fields
 
     public static function save_field(int $post_id): void
     {
-        if (!isset($_POST['_waffo_product_id'])) {
+        // WooCommerce 在触发 woocommerce_process_product_meta 前已校验过该 nonce，这里再校验一次以防其他代码直接触发此钩子
+        $nonce = isset($_POST['woocommerce_meta_nonce']) ? sanitize_text_field(wp_unslash($_POST['woocommerce_meta_nonce'])) : '';
+        if (!wp_verify_nonce($nonce, 'woocommerce_save_data') || !isset($_POST['_waffo_product_id'])) {
             return;
         }
 

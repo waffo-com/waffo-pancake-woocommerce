@@ -9,12 +9,19 @@ namespace WaffoPancake\Order;
  * 且天然幂等：同一笔付款不论先从哪条链路到达、到达几次，结果一致。
  *
  * 订单对象不做类型约束（鸭子类型），只依赖 WC_Order 的以下方法：
- * has_status / get_meta / update_meta_data / add_order_note / payment_complete / update_status / save。
+ * has_status / get_meta / update_meta_data / add_order_note / payment_complete / update_status / save，
+ * 退款回滚另外用到 get_refunds()，退款对象只需 get_id / get_meta / get_amount / delete。
  * 这样纯逻辑可以在没有WooCommerce的PHPUnit环境里用假订单对象覆盖。
  */
 class Waffo_Order_Sync
 {
     public const META_PAYMENT_ID = '_waffo_payment_id';
+
+    /** WC退款记录上的商户侧退款标识，提交工单时作为 refundTicketMerchantExternalId 发给Waffo */
+    public const META_REFUND_REF = '_waffo_refund_ref';
+
+    /** 创建WC退款记录前的订单状态，退款失败回滚时用来恢复 */
+    public const META_REFUND_PRIOR_STATUS = '_waffo_refund_prior_status';
 
     /** WC里视为"已付款"的状态，再次收到付款成功不应重复触发payment_complete */
     private const PAID_STATUSES = ['processing', 'completed', 'refunded'];
@@ -106,18 +113,26 @@ class Waffo_Order_Sync
 
         if (str_starts_with($type, 'refund.')) {
             $order = $this->load($wc_order_id);
-            if ($order !== null) {
-                // 退款状态只留痕：WC侧的退款记录在 process_refund() 提交工单时已创建；
-                // refund.failed 需要商户人工介入，所以把状态写进备注让后台能看到
-                $order->add_order_note(sprintf(
-                    'Waffo Pancake refund %s: %s %s (event %s).',
-                    (string) ($data['refundStatus'] ?? 'updated'),
-                    (string) ($data['amount'] ?? '?'),
-                    (string) ($data['currency'] ?? ''),
-                    (string) ($event['eventId'] ?? '')
-                ));
-                $order->save();
+            if ($order === null) {
+                return;
             }
+
+            $amount = (string) ($data['refundedAmount'] ?? $data['amount'] ?? '?');
+            $order->add_order_note(sprintf(
+                'Waffo Pancake refund %s: %s %s (event %s).',
+                (string) ($data['refundStatus'] ?? substr($type, strlen('refund.'))),
+                $amount,
+                (string) ($data['currency'] ?? ''),
+                (string) ($event['eventId'] ?? '')
+            ));
+
+            if ($type === 'refund.failed') {
+                // WC在process_refund()提交工单成功时就已生成退款记录；Waffo最终退款失败时撤销它，
+                // 避免后台显示"已退款"而买家实际没收到钱
+                $this->roll_back_refund($order, (string) ($data['refundTicketMerchantExternalId'] ?? ''));
+            }
+
+            $order->save();
             return;
         }
 
@@ -129,6 +144,47 @@ class Waffo_Order_Sync
                 $order->save();
             }
         }
+    }
+
+    /**
+     * 按商户侧退款标识找到对应的WC退款记录并删除；若该退款把订单推成了 refunded，恢复到退款前状态。
+     * 找不到对应记录（旧版本创建的退款、已被删除、重复事件）时只提示商户人工核对，不做其他改动。
+     */
+    private function roll_back_refund(object $order, string $refund_ref): void
+    {
+        $target = null;
+        if ($refund_ref !== '' && method_exists($order, 'get_refunds')) {
+            foreach ($order->get_refunds() as $refund) {
+                if ($refund->get_meta(self::META_REFUND_REF) === $refund_ref) {
+                    $target = $refund;
+                    break;
+                }
+            }
+        }
+
+        if ($target === null) {
+            $order->add_order_note('Waffo Pancake refund failed, but the matching WooCommerce refund record was not found. Please review this order\'s refunds manually.');
+            return;
+        }
+
+        $prior_status = (string) $target->get_meta(self::META_REFUND_PRIOR_STATUS);
+        $refund_id = $target->get_id();
+        $refund_amount = $target->get_amount();
+        $target->delete(true);
+        if (function_exists('wc_delete_shop_order_transients')) {
+            wc_delete_shop_order_transients($order);
+        }
+
+        if ($order->has_status('refunded')) {
+            $order->update_status($prior_status !== '' && $prior_status !== 'refunded' ? $prior_status : 'processing');
+        }
+
+        $order->add_order_note(sprintf(
+            'Waffo Pancake refund failed: WooCommerce refund #%s (%s) has been removed. No money was returned to the customer.',
+            (string) $refund_id,
+            (string) $refund_amount
+        ));
+        ($this->log)(sprintf('Rolled back WooCommerce refund #%s on order after refund.failed', (string) $refund_id));
     }
 
     private function load(string $wc_order_id): ?object

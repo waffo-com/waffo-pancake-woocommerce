@@ -60,6 +60,44 @@ class Fake_Order
     {
         $this->saves++;
     }
+
+    /** @var Fake_Refund[] */
+    public array $refunds = [];
+
+    public function get_refunds(): array
+    {
+        return array_values(array_filter($this->refunds, fn (Fake_Refund $r) => !$r->deleted));
+    }
+}
+
+class Fake_Refund
+{
+    public bool $deleted = false;
+
+    public function __construct(public int $id, public string $amount, public array $meta = [])
+    {
+    }
+
+    public function get_id(): int
+    {
+        return $this->id;
+    }
+
+    public function get_amount(): string
+    {
+        return $this->amount;
+    }
+
+    public function get_meta(string $key)
+    {
+        return $this->meta[$key] ?? '';
+    }
+
+    public function delete(bool $force = false): bool
+    {
+        $this->deleted = true;
+        return true;
+    }
 }
 
 class Waffo_Order_Sync_Test extends TestCase
@@ -170,28 +208,84 @@ class Waffo_Order_Sync_Test extends TestCase
         $this->assertEmpty($this->logs);
     }
 
-    public function test_apply_webhook_event_adds_note_for_refund_events(): void
+    public function test_refund_succeeded_only_adds_note(): void
     {
         $order = new Fake_Order('processing');
+        $refund = new Fake_Refund(7, '10.00', [Waffo_Order_Sync::META_REFUND_REF => 'wc_42_abc']);
+        $order->refunds = [$refund];
         $this->orders['42'] = $order;
 
-        $sync = $this->make_sync();
-        $sync->apply_webhook_event([
+        $this->make_sync()->apply_webhook_event([
             'eventType' => 'refund.succeeded',
             'eventId'   => 'REF_1',
-            'data'      => ['orderMerchantExternalId' => '42', 'amount' => '10.00', 'currency' => 'USD', 'refundStatus' => 'succeeded'],
-        ]);
-        $sync->apply_webhook_event([
-            'eventType' => 'refund.failed',
-            'eventId'   => 'REF_2',
-            'data'      => ['orderMerchantExternalId' => '42', 'amount' => '5.00', 'currency' => 'USD', 'refundStatus' => 'failed'],
+            'data'      => ['orderMerchantExternalId' => '42', 'refundTicketMerchantExternalId' => 'wc_42_abc', 'refundedAmount' => '10.00', 'currency' => 'USD', 'refundStatus' => 'succeeded'],
         ]);
 
-        $this->assertCount(2, $order->notes);
+        $this->assertCount(1, $order->notes);
         $this->assertStringContainsString('10.00 USD', $order->notes[0]);
-        $this->assertStringContainsString('failed', $order->notes[1]);
-        // 退款事件不改订单状态：WC侧的退款记录在process_refund时已创建，这里只留痕
+        $this->assertFalse($refund->deleted);
         $this->assertSame('processing', $order->status);
+    }
+
+    public function test_refund_failed_removes_matching_refund_and_restores_status(): void
+    {
+        $order = new Fake_Order('refunded');
+        $other = new Fake_Refund(6, '1.00', [Waffo_Order_Sync::META_REFUND_REF => 'wc_42_other']);
+        $target = new Fake_Refund(7, '10.00', [
+            Waffo_Order_Sync::META_REFUND_REF          => 'wc_42_abc',
+            Waffo_Order_Sync::META_REFUND_PRIOR_STATUS => 'completed',
+        ]);
+        $order->refunds = [$other, $target];
+        $this->orders['42'] = $order;
+
+        $this->make_sync()->apply_webhook_event([
+            'eventType' => 'refund.failed',
+            'eventId'   => 'REF_2',
+            'data'      => ['orderMerchantExternalId' => '42', 'refundTicketMerchantExternalId' => 'wc_42_abc', 'refundedAmount' => '10.00', 'currency' => 'USD', 'refundStatus' => 'failed'],
+        ]);
+
+        $this->assertTrue($target->deleted);
+        $this->assertFalse($other->deleted);
+        $this->assertSame('completed', $order->status);
+        $this->assertStringContainsString('failed', $order->notes[0]);
+        $this->assertStringContainsString('#7', end($order->notes));
+    }
+
+    public function test_partial_refund_failed_keeps_non_refunded_status(): void
+    {
+        $order = new Fake_Order('processing');
+        $target = new Fake_Refund(7, '3.00', [
+            Waffo_Order_Sync::META_REFUND_REF          => 'wc_42_abc',
+            Waffo_Order_Sync::META_REFUND_PRIOR_STATUS => 'processing',
+        ]);
+        $order->refunds = [$target];
+        $this->orders['42'] = $order;
+
+        $this->make_sync()->apply_webhook_event([
+            'eventType' => 'refund.failed',
+            'eventId'   => 'REF_3',
+            'data'      => ['orderMerchantExternalId' => '42', 'refundTicketMerchantExternalId' => 'wc_42_abc'],
+        ]);
+
+        $this->assertTrue($target->deleted);
+        $this->assertSame('processing', $order->status);
+    }
+
+    public function test_refund_failed_without_matching_record_asks_for_manual_review(): void
+    {
+        $order = new Fake_Order('refunded');
+        $order->refunds = [new Fake_Refund(7, '10.00')];
+        $this->orders['42'] = $order;
+
+        $this->make_sync()->apply_webhook_event([
+            'eventType' => 'refund.failed',
+            'eventId'   => 'REF_4',
+            'data'      => ['orderMerchantExternalId' => '42', 'amount' => '10.00', 'currency' => 'USD'],
+        ]);
+
+        $this->assertFalse($order->refunds[0]->deleted);
+        $this->assertSame('refunded', $order->status);
+        $this->assertStringContainsString('manually', end($order->notes));
     }
 
     public function test_apply_webhook_event_adds_note_for_subscription_events_without_status_change(): void
