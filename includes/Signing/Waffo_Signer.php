@@ -9,7 +9,22 @@ class Waffo_Signer
 
     public function __construct(string $private_key_pem)
     {
-        $this->private_key_pem = $private_key_pem;
+        $this->private_key_pem = self::normalize_private_key($private_key_pem);
+    }
+
+    private static function normalize_private_key(string $input): string
+    {
+        $input = trim($input);
+        $label = 'PRIVATE KEY';
+        if (preg_match('/\A-----BEGIN (PRIVATE KEY|RSA PRIVATE KEY)-----(.*?)-----END \1-----\z/s', $input, $matches)) {
+            $label = $matches[1];
+            $input = $matches[2];
+        }
+
+        $body = preg_replace('/\s+/', '', $input);
+        return "-----BEGIN {$label}-----\n"
+            . chunk_split($body, 64, "\n")
+            . "-----END {$label}-----\n";
     }
 
     public function sign(string $method, string $path, int $timestamp_ms, string $body): string

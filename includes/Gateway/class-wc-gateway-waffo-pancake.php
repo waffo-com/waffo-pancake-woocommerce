@@ -59,9 +59,9 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
                 'description' => 'Your Waffo Merchant ID (MER_xxx), from Waffo Dashboard API key settings.',
             ],
             'private_key' => [
-                'title'       => 'Private Key (PEM)',
+                'title'       => 'Private Key',
                 'type'        => 'password',
-                'description' => 'RSA private key generated in Waffo Dashboard. Stored encrypted at rest is recommended; never logged or displayed in plaintext after initial entry.',
+                'description' => 'Paste the RSA private key copied from Waffo Dashboard. Both Base64 content and a complete PEM private key are accepted.',
             ],
             'store_id' => [
                 'title'       => 'Store ID',
