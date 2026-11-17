@@ -1,5 +1,5 @@
 === Waffo Pancake for WooCommerce ===
-Contributors: TODO-wporg-username
+Contributors: weibaichao
 Tags: payments, checkout, merchant of record, digital products, payment gateway
 Requires at least: 6.5
 Tested up to: 7.1
