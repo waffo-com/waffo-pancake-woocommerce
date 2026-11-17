@@ -38,6 +38,9 @@ add_action('plugins_loaded', function () {
 
     \WaffoPancake\Product\Waffo_Product_Fields::register();
 
+    // 给本网关的WC退款记录打标识，refund.failed 时据此撤销（见 Waffo_Order_Sync::roll_back_refund）
+    add_action('woocommerce_create_refund', [\WaffoPancake\Gateway\WC_Gateway_Waffo_Pancake::class, 'tag_refund'], 10, 2);
+
     // ---- Webhook：验签 → 去重 → 同步WC订单 ----
     // 验签公钥按后台Environment选项选择（test/prod各一把平台固定公钥，商户无需配置）。
     // 事件里的 mode 字段与之不一致时验签会失败并返回401，这是预期行为：防止test事件打到prod站点。

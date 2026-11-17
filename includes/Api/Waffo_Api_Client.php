@@ -65,13 +65,22 @@ class Waffo_Api_Client
      * @param string $amount 必须用 Waffo_Money::to_display_string() 生成，不要手工拼接，
      *                        尤其零小数货币（如JPY）没有小数位，手工拼接容易出错。
      */
-    public function create_refund_ticket(string $payment_id, string $amount, string $currency, string $reason): array
+    /**
+     * @param string|null $merchant_ref 商户侧退款标识（refundTicketMerchantExternalId，≤128字符），
+     *                                  Waffo会在 refund.* webhook 里原样带回，用于定位对应的WC退款记录
+     */
+    public function create_refund_ticket(string $payment_id, string $amount, string $currency, string $reason, ?string $merchant_ref = null): array
     {
-        $response = $this->post('/v1/actions/refund-ticket/create-ticket', [
+        $payload = [
             'paymentId' => $payment_id,
             'requestedAmount' => ['amount' => $amount, 'currency' => $currency],
             'reason' => $reason,
-        ]);
+        ];
+        if ($merchant_ref !== null && $merchant_ref !== '') {
+            $payload['refundTicketMerchantExternalId'] = $merchant_ref;
+        }
+
+        $response = $this->post('/v1/actions/refund-ticket/create-ticket', $payload);
 
         return $response['data'];
     }

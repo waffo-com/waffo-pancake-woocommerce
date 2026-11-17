@@ -10,6 +10,32 @@ if (!defined('ABSPATH')) {
 
 class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
 {
+    /**
+     * 当前请求里刚创建、尚未提交给Waffo的WC退款标识。
+     * wc_create_refund() 先触发 woocommerce_create_refund（tag_refund 在这里生成标识并写到退款记录上），
+     * 再在同一请求内调用 process_refund()，后者取走该标识随工单发给Waffo。
+     */
+    private static ?string $pending_refund_ref = null;
+
+    /**
+     * woocommerce_create_refund 回调：给本网关订单的退款记录打上商户侧标识和退款前订单状态，
+     * 使 refund.failed webhook 能定位并撤销这条记录。
+     */
+    public static function tag_refund($refund, $args): void
+    {
+        self::$pending_refund_ref = null;
+
+        $order = wc_get_order($args['order_id'] ?? 0);
+        if (!$order || $order->get_payment_method() !== 'waffo_pancake') {
+            return;
+        }
+
+        $ref = sprintf('wc_%d_%s', $order->get_id(), wp_generate_password(16, false));
+        $refund->update_meta_data(\WaffoPancake\Order\Waffo_Order_Sync::META_REFUND_REF, $ref);
+        $refund->update_meta_data(\WaffoPancake\Order\Waffo_Order_Sync::META_REFUND_PRIOR_STATUS, $order->get_status());
+        self::$pending_refund_ref = $ref;
+    }
+
     public function __construct()
     {
         $this->id                 = 'waffo_pancake';
@@ -211,10 +237,13 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
 
             $display_amount = \WaffoPancake\Money\Waffo_Money::from_order_total($refund_amount, $order->get_currency());
 
-            $ticket = $client->create_refund_ticket($payment_id, $display_amount, $order->get_currency(), $reason ?: 'Refund requested via WooCommerce');
+            $refund_ref = self::$pending_refund_ref;
+            self::$pending_refund_ref = null;
+
+            $ticket = $client->create_refund_ticket($payment_id, $display_amount, $order->get_currency(), $reason ?: 'Refund requested via WooCommerce', $refund_ref);
 
             $order->add_order_note(sprintf(
-                'Waffo refund ticket %s submitted (status: %s). Refund will complete once Waffo reviews and approves the request — this is not instant.',
+                'Waffo refund ticket %s submitted (status: %s). The refund is recorded in WooCommerce now; if Waffo later reports it failed, this refund record will be removed automatically. Check the Waffo Dashboard for the final result.',
                 $ticket['ticketId'],
                 $ticket['status']
             ));
