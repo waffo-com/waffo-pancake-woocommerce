@@ -46,7 +46,7 @@ WooCommerce → Settings → Payments → Waffo Pancake:
 |---------|------------------|
 | Environment | Must match the environment your API key was created in. Selects the webhook verification key; API requests always go to `https://api.waffo.ai`. |
 | Merchant ID / Private Key | Waffo Dashboard → API & Development. Create the key in Test or Production. |
-| Store ID | Waffo Dashboard → store settings (`STO_xxx`). Required by the reconciliation job. |
+| Store ID | Waffo Dashboard → store settings (`STO_xxx`). Required for webhook authorization and the reconciliation job. |
 | Waffo Tax Category | Tax category sent in `priceSnapshot`; prices are assumed tax-inclusive. |
 
 Then register the webhook in Waffo Dashboard → Settings → Webhooks, channel

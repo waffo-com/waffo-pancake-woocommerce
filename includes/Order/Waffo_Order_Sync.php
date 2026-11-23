@@ -1,6 +1,8 @@
 <?php
 namespace WaffoPancake\Order;
 
+use WaffoPancake\Waffo_Settings;
+
 /**
  * 把Waffo侧的订单结果同步到WooCommerce订单。
  *
@@ -100,9 +102,9 @@ class Waffo_Order_Sync
     {
         $type = (string) ($event['eventType'] ?? '');
         $data = is_array($event['data'] ?? null) ? $event['data'] : [];
-        $wc_order_id = (string) ($data['orderMerchantExternalId'] ?? '');
+        $wc_order_id = $data['orderMerchantExternalId'] ?? '';
 
-        if ($wc_order_id === '') {
+        if (!is_string($wc_order_id)) {
             return;
         }
 
@@ -189,11 +191,30 @@ class Waffo_Order_Sync
 
     private function load(string $wc_order_id): ?object
     {
+        if (!$this->is_valid_order_id($wc_order_id)) {
+            return null;
+        }
+
         $order = ($this->find_order)($wc_order_id);
         if (!is_object($order)) {
             ($this->log)(sprintf('Order sync skipped: WooCommerce order #%s not found', $wc_order_id));
             return null;
         }
+        if (!$this->is_pancake_order($order)) {
+            ($this->log)('Order sync skipped: order was not checked out with Waffo Pancake');
+            return null;
+        }
         return $order;
+    }
+
+    private function is_valid_order_id(string $id): bool
+    {
+        return ctype_digit($id) && (string) (int) $id === $id && (int) $id > 0;
+    }
+
+    private function is_pancake_order(object $order): bool
+    {
+        return $order->get_payment_method() === Waffo_Settings::GATEWAY_ID
+            && $order->get_meta('_waffo_checkout_session_id') !== '';
     }
 }

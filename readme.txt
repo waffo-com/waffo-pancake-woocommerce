@@ -4,7 +4,7 @@ Tags: payments, checkout, merchant of record, digital products, payment gateway
 Requires at least: 6.5
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.1.1
+Stable tag: 0.1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -46,7 +46,7 @@ This plugin connects to the Waffo Pancake service, operated by Waffo, to create 
 
 **Waffo webhooks**
 
-* Waffo sends payment and refund notifications to the store's REST endpoint `/wp-json/waffo-pancake/v1/webhook`. Each notification is verified with Waffo's public key before it is processed.
+* Waffo sends payment and refund notifications to the store's REST endpoint `/wp-json/waffo-pancake/v1/webhook`. Each notification is verified with Waffo's public key and must belong to the configured Store ID. Order updates require the Waffo Pancake payment method and a saved checkout session.
 
 Waffo terms and policies:
 
@@ -81,9 +81,13 @@ When you click Refund on an order, the plugin submits a refund request to Waffo 
 
 = The buyer paid but the order is still On hold. What should I check? =
 
-Make sure the webhook is registered in the Waffo Dashboard with the correct URL and that the Environment setting matches your API key. The background reconciliation job also checks unpaid orders every 15 minutes, which requires the Store ID to be set. Enable Debug Log in the plugin settings and look at WooCommerce → Status → Logs (source `waffo_pancake`).
+Make sure the webhook is registered in the Waffo Dashboard with the correct URL and that the Environment setting matches your API key. The Store ID must match the notification's store; missing or mismatched Store IDs are rejected. The background reconciliation job also checks unpaid orders every 15 minutes. Enable Debug Log in the plugin settings and look at WooCommerce → Status → Logs (source `waffo_pancake`).
 
 == Changelog ==
+
+= 0.1.2 =
+* Verify the signed webhook Store ID before processing notifications, including duplicate deliveries. Reject webhooks when no Store ID is configured.
+* Only synchronize orders using Waffo Pancake with a recorded checkout session, and reject malformed external order IDs.
 
 = 0.1.1 =
 * Refunds that Waffo reports as failed are now removed from the WooCommerce order automatically, and the order status is restored.
@@ -94,6 +98,9 @@ Make sure the webhook is registered in the Waffo Dashboard with the correct URL 
 * First beta release: one-time payments through Waffo hosted checkout, signed webhooks, background reconciliation and refund requests.
 
 == Upgrade Notice ==
+
+= 0.1.2 =
+Security update: webhooks must match your configured Store ID. Set the Store ID before accepting payments.
 
 = 0.1.1 =
 Failed refunds are now rolled back in WooCommerce automatically.

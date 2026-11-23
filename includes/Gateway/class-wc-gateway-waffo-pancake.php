@@ -92,7 +92,7 @@ class WC_Gateway_Waffo_Pancake extends \WC_Payment_Gateway
             'store_id' => [
                 'title'       => 'Store ID',
                 'type'        => 'text',
-                'description' => 'Your Waffo Store ID (STO_xxx), shown in Waffo Dashboard → store settings. Required for the background reconciliation job that recovers orders when a webhook is missed.',
+                'description' => 'Your Waffo Store ID (STO_xxx), shown in Waffo Dashboard → store settings. Required to authorize incoming webhooks and recover orders when a webhook is missed.',
             ],
             'waffo_tax_category' => [
                 'title'       => 'Waffo Tax Category',

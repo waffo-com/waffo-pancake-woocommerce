@@ -10,7 +10,8 @@ use WaffoPancake\Order\Waffo_Order_Sync;
 class Fake_Order
 {
     public string $status;
-    public array $meta = [];
+    public array $meta = ['_waffo_checkout_session_id' => 'CS_test'];
+    public string $payment_method = 'waffo_pancake';
     public array $notes = [];
     public int $saves = 0;
     public ?string $completed_with_txn = null;
@@ -23,6 +24,11 @@ class Fake_Order
     public function has_status($statuses): bool
     {
         return in_array($this->status, (array) $statuses, true);
+    }
+
+    public function get_payment_method(): string
+    {
+        return $this->payment_method;
     }
 
     public function get_meta(string $key)
@@ -303,4 +309,59 @@ class Waffo_Order_Sync_Test extends TestCase
         $this->assertStringContainsString('subscription.canceled', $order->notes[0]);
         $this->assertSame('processing', $order->status);
     }
+    /** @dataProvider unrelated_orders */
+    public function test_all_sync_paths_leave_unrelated_orders_untouched(string $method, bool $session): void
+    {
+        $order = new Fake_Order('on-hold');
+        $order->payment_method = $method;
+        if (!$session) {
+            unset($order->meta['_waffo_checkout_session_id']);
+        }
+        $refund = new Fake_Refund(7, '10.00', [Waffo_Order_Sync::META_REFUND_REF => 'wc_42_abc']);
+        $order->refunds = [$refund];
+        $this->orders['42'] = $order;
+        $before = $order->meta;
+        $sync = $this->make_sync();
+        $this->assertFalse($sync->mark_paid('42', 'PAY_1', 'cron'));
+        $this->assertFalse($sync->mark_canceled('42', 'cron'));
+        foreach (['order.completed', 'refund.succeeded', 'refund.failed', 'subscription.canceled'] as $type) {
+            $sync->apply_webhook_event([
+                'eventType' => $type, 'eventId' => 'EVT_1',
+                'data' => ['orderMerchantExternalId' => '42', 'paymentId' => 'PAY_1', 'refundTicketMerchantExternalId' => 'wc_42_abc'],
+            ]);
+        }
+        $this->assertSame('on-hold', $order->status);
+        $this->assertSame($before, $order->meta);
+        $this->assertSame([], $order->notes);
+        $this->assertSame(0, $order->saves);
+        $this->assertNull($order->completed_with_txn);
+        $this->assertFalse($refund->deleted);
+    }
+
+    public static function unrelated_orders(): array
+    {
+        return [
+            'another gateway' => ['stripe', true],
+            'no gateway' => ['', true],
+            'no checkout' => ['waffo_pancake', false],
+        ];
+    }
+
+    /** @dataProvider invalid_external_ids */
+    public function test_invalid_external_ids_never_trigger_order_lookup($id): void
+    {
+        $sync = new Waffo_Order_Sync(function () {
+            $this->fail('Malformed external IDs must not resolve to a local order');
+        });
+        $sync->apply_webhook_event([
+            'eventType' => 'order.completed', 'data' => ['orderMerchantExternalId' => $id],
+        ]);
+        $this->addToAssertionCount(1);
+    }
+
+    public static function invalid_external_ids(): array
+    {
+        return array_map(static fn ($id) => [$id], ['', '0', '-42', '042', '42bad', '4.2', '4e2', ' 42', '99999999999999999999999999999', 42, ['42'], null]);
+    }
+
 }

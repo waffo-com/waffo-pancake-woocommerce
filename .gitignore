@@ -5,3 +5,5 @@ vendor/
 *.pem
 !tests/fixtures/*.pem
 .env
+
+/dist/

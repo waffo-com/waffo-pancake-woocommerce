@@ -25,7 +25,7 @@ class Waffo_Webhook_Controller_Test extends TestCase
         return new Waffo_Webhook_Controller($verifier, $dedup, function (array $event) use (&$handled) {
             $handled[] = $event;
             return $handled;
-        });
+        }, 'STO_1');
     }
 
     public function test_register_routes_registers_expected_route(): void
@@ -51,7 +51,7 @@ class Waffo_Webhook_Controller_Test extends TestCase
 
         $request = \Mockery::mock('WP_REST_Request');
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=bad');
-        $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_1"}');
+        $request->shouldReceive('get_body')->andReturn('{"storeId":"STO_1","eventId":"PAY_1"}');
 
         $response = $controller->handle($request);
 
@@ -71,11 +71,11 @@ class Waffo_Webhook_Controller_Test extends TestCase
         $processed = [];
         $controller = new Waffo_Webhook_Controller($verifier, $dedup, function (array $event) use (&$processed) {
             $processed[] = $event;
-        });
+        }, 'STO_1');
 
         $request = \Mockery::mock('WP_REST_Request');
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
-        $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_1","eventType":"order.completed"}');
+        $request->shouldReceive('get_body')->andReturn('{"storeId":"STO_1","eventId":"PAY_1","eventType":"order.completed"}');
 
         $response = $controller->handle($request);
 
@@ -95,11 +95,11 @@ class Waffo_Webhook_Controller_Test extends TestCase
         $processed = [];
         $controller = new Waffo_Webhook_Controller($verifier, $dedup, function (array $event) use (&$processed) {
             $processed[] = $event;
-        });
+        }, 'STO_1');
 
         $request = \Mockery::mock('WP_REST_Request');
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
-        $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_2","eventType":"order.completed"}');
+        $request->shouldReceive('get_body')->andReturn('{"storeId":"STO_1","eventId":"PAY_2","eventType":"order.completed"}');
 
         $response = $controller->handle($request);
 
@@ -138,11 +138,11 @@ class Waffo_Webhook_Controller_Test extends TestCase
 
         $controller = new Waffo_Webhook_Controller($verifier, $dedup, function (array $event) {
             throw new \RuntimeException('downstream order update failed');
-        });
+        }, 'STO_1');
 
         $request = \Mockery::mock('WP_REST_Request');
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
-        $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_3","eventType":"order.completed"}');
+        $request->shouldReceive('get_body')->andReturn('{"storeId":"STO_1","eventId":"PAY_3","eventType":"order.completed"}');
 
         $response = $controller->handle($request);
 
@@ -162,12 +162,12 @@ class Waffo_Webhook_Controller_Test extends TestCase
         $processed = [];
         $controller = new Waffo_Webhook_Controller($verifier, $dedup, function (array $event) use (&$processed) {
             $processed[] = $event['eventType'];
-        });
+        }, 'STO_1');
 
         foreach (['subscription.activated', 'subscription.canceled'] as $type) {
             $request = \Mockery::mock('WP_REST_Request');
             $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
-            $request->shouldReceive('get_body')->andReturn(json_encode(['eventId' => 'ORD_1', 'eventType' => $type]));
+            $request->shouldReceive('get_body')->andReturn(json_encode(['storeId' => 'STO_1', 'eventId' => 'ORD_1', 'eventType' => $type]));
             $this->assertSame(200, $controller->handle($request)->get_status());
         }
 
@@ -184,7 +184,7 @@ class Waffo_Webhook_Controller_Test extends TestCase
 
         $request = \Mockery::mock('WP_REST_Request');
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
-        $request->shouldReceive('get_body')->andReturn('{"eventId":"PAY_1"}');
+        $request->shouldReceive('get_body')->andReturn('{"storeId":"STO_1","eventId":"PAY_1"}');
 
         $this->assertSame(400, $controller->handle($request)->get_status());
     }
@@ -199,11 +199,59 @@ class Waffo_Webhook_Controller_Test extends TestCase
 
         $request = \Mockery::mock('WP_REST_Request');
         $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
-        $request->shouldReceive('get_body')->andReturn('{"eventId":12345,"eventType":"order.completed"}');
+        $request->shouldReceive('get_body')->andReturn('{"storeId":"STO_1","eventId":12345,"eventType":"order.completed"}');
 
         $response = $controller->handle($request);
 
         $this->assertInstanceOf(\WP_REST_Response::class, $response);
         $this->assertSame(400, $response->get_status());
+    }
+    /** @dataProvider unauthorized_stores */
+    public function test_store_authorization_precedes_dedup_and_processing($store_id, string $configured, int $status): void
+    {
+        $verifier = \Mockery::mock(Waffo_Webhook_Verifier::class);
+        $verifier->shouldReceive('verify')->twice()->andReturn(true);
+        $dedup = new Waffo_Event_Deduplicator(new In_Memory_Event_Store());
+        $controller = new Waffo_Webhook_Controller($verifier, $dedup, function () {
+            $this->fail('Unauthorized events must never reach order sync');
+        }, $configured);
+        $request = \Mockery::mock('WP_REST_Request');
+        $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
+        $request->shouldReceive('get_body')->andReturn(json_encode([
+            'storeId' => $store_id, 'eventId' => 'PAY_untrusted', 'eventType' => 'order.completed',
+        ]));
+        $authorization = $controller->authorize($request);
+        $this->assertInstanceOf(\WP_Error::class, $authorization);
+        $this->assertSame($status, $authorization->get_error_data()['status']);
+        $this->assertSame($status, $controller->handle($request)->get_status());
+        $key = Waffo_Webhook_Controller::dedup_key('order.completed', 'PAY_untrusted');
+        $this->assertFalse($dedup->is_duplicate($key));
+        $dedup->mark_processed($key);
+        $verifier->shouldReceive('verify')->once()->andReturn(true);
+        $this->assertSame($status, $controller->handle($request)->get_status());
+    }
+
+    public static function unauthorized_stores(): array
+    {
+        return [
+            'another merchant or store' => ['STO_other', 'STO_1', 403],
+            'missing store' => [null, 'STO_1', 403],
+            'empty store' => ['', 'STO_1', 403],
+            'array store' => [['STO_1'], 'STO_1', 403],
+            'numeric store' => [123, 'STO_1', 403],
+            'unconfigured' => ['STO_1', '', 503],
+            'blank configuration' => ['STO_1', '  ', 503],
+        ];
+    }
+
+    public function test_authorize_allows_a_valid_signature_for_the_configured_store(): void
+    {
+        $verifier = \Mockery::mock(Waffo_Webhook_Verifier::class);
+        $verifier->shouldReceive('verify')->once()->andReturn(true);
+        $controller = $this->make_controller($verifier, new Waffo_Event_Deduplicator(new In_Memory_Event_Store()));
+        $request = \Mockery::mock('WP_REST_Request');
+        $request->shouldReceive('get_header')->with('X-Waffo-Signature')->andReturn('t=1,v1=sig');
+        $request->shouldReceive('get_body')->andReturn('{"storeId":"STO_1","eventId":"PAY_1","eventType":"order.completed"}');
+        $this->assertTrue($controller->authorize($request));
     }
 }
